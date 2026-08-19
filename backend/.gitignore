@@ -10,3 +10,5 @@ wheels/
 .venv
 arxiv_rag_papers/
 arxiv_rag_metadata.jsonl
+docling_json/
+manifest.jsonl
