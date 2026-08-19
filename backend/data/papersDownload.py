@@ -20,8 +20,8 @@ import feedparser
 import requests
 
 BASE_URL = "http://export.arxiv.org/api/query"
-OUTPUT_DIR = "arxiv_rag_papers"
-METADATA_FILE = "arxiv_rag_metadata.jsonl"
+OUTPUT_DIR = "../arxiv_rag_papers"
+METADATA_FILE = "../arxiv_rag_metadata.jsonl"
 BATCH_SIZE = 100  # papers per API request
 SLEEP_BETWEEN_REQUESTS = 3  # seconds, per arXiv API terms of use
 SLEEP_BETWEEN_DOWNLOADS = 1  # seconds, be polite to the PDF mirror
