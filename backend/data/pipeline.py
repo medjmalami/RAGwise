@@ -105,9 +105,9 @@ class PipelineConfig:
     manifest_path: Path
 
     # Fidelity
-    table_mode: TableFormerMode = TableFormerMode.ACCURATE
-    do_formula_enrichment: bool = True
-    do_code_enrichment: bool = True
+    table_mode: TableFormerMode = TableFormerMode.FAST
+    do_formula_enrichment: bool = False
+    do_code_enrichment: bool = False
     do_picture_description: bool = True
 
     # Only describe sufficiently large/informative figures.
@@ -119,7 +119,7 @@ class PipelineConfig:
 
     # Hardware
     device: AcceleratorDevice = AcceleratorDevice.CUDA
-    num_threads: int = 8
+    num_threads: int = 4
     use_flash_attention2: bool = False
 
     # Resume
