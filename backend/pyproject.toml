@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "docling-slim[convert-core,extract-core,feat-chunking,format-html]>=2.120.2",
+    "docling-ibm-models>=3.14.0",
+    "docling-parse>=7.15.0",
+    "docling-slim[convert-core,docling-parse,extract-core,feat-chunking,format-html,format-html-render,format-pdf-pypdfium2]>=2.120.2",
     "feedparser>=6.0.14",
     "requests>=2.34.2",
 ]

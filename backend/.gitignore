@@ -9,6 +9,5 @@ wheels/
 # Virtual environments
 .venv
 arxiv_rag_papers/
-arxiv_rag_metadata.jsonl
 docling/
 manifest.jsonl
