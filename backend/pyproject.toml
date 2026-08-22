@@ -5,17 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "docling>=2.120.2",
+    "docling-slim[convert-core,extract-core,feat-chunking,format-html]>=2.120.2",
     "feedparser>=6.0.14",
-    "onnxruntime>=1.29.0",
     "requests>=2.34.2",
 ]
-[tool.uv.sources]
-torch = { index = "pytorch-cu130" }
-torchvision = { index = "pytorch-cu130" }
-torchaudio = { index = "pytorch-cu130" }
-
-[[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
-explicit = true
