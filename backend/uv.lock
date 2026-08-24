@@ -287,10 +287,10 @@ wheels = [
 
 [[package]]
 name = "cuda-pathfinder"
-version = "1.6.1"
+version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/1e/2942a0d6d52240d439f44384a40c65d359d9ca70325b65b265c020113121/cuda_pathfinder-1.6.1-py3-none-any.whl", hash = "sha256:cc8ec4cb0881fa5bcbf96b6dd75d50e55352b74dd33d4f3d884e192e7c2b6ef8", size = 60238, upload-time = "2026-08-18T02:57:50.087Z" },
+    { url = "https://files.pythonhosted.org/packages/62/01/a7171c5e2e8755597bd8f1c1eb228a0876f502afdf25f936061f5dbe2880/cuda_pathfinder-1.7.0-py3-none-any.whl", hash = "sha256:e9d67e950f3d5992b854dfd25917c3719d0c21d3057b11abe86ba6feec526138", size = 63091, upload-time = "2026-08-24T04:13:56.054Z" },
 ]
 
 [[package]]
@@ -469,8 +469,8 @@ wheels = [
 
 [[package]]
 name = "docling-slim"
-version = "2.120.2"
-source = { registry = "https://pypi.org/simple" }
+version = "2.121.0"
+source = { git = "https://github.com/medjmalami/docling.git?rev=2b63ba80dafeed09d36efeccba347f7753f57810#2b63ba80dafeed09d36efeccba347f7753f57810" }
 dependencies = [
     { name = "certifi" },
     { name = "docling-core" },
@@ -480,10 +480,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "requests" },
     { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7e/b1/6f82d109657d6da289533c10acacebf0a23bcc7bbc8228d51e49b53874d6/docling_slim-2.120.2.tar.gz", hash = "sha256:2b50810dbf4fb94eefede35c2893ca0a473ffe7515ca041812d82833d7eb5fc4", size = 590281, upload-time = "2026-08-17T10:02:13.31Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/de/7021957ff8aef7b213847808b8e1ed5d74205ed5076ecda870a893a08728/docling_slim-2.120.2-py3-none-any.whl", hash = "sha256:b36f0ba32ca26f577dcecf30faf64557b131fb0cacd7857680aa446e5788f6d0", size = 731549, upload-time = "2026-08-17T10:02:11.377Z" },
 ]
 
 [package.optional-dependencies]
@@ -1889,6 +1885,7 @@ name = "ragwise"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "beautifulsoup4" },
     { name = "docling-ibm-models" },
     { name = "docling-parse" },
     { name = "docling-slim", extra = ["convert-core", "extract-core", "feat-chunking", "format-html", "format-html-render", "format-pdf-pypdfium2"] },
@@ -1898,9 +1895,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.15.0" },
     { name = "docling-ibm-models", specifier = ">=3.14.0" },
     { name = "docling-parse", specifier = ">=7.15.0" },
-    { name = "docling-slim", extras = ["convert-core", "docling-parse", "extract-core", "feat-chunking", "format-html", "format-html-render", "format-pdf-pypdfium2"], specifier = ">=2.120.2" },
+    { name = "docling-slim", extras = ["convert-core", "docling-parse", "extract-core", "feat-chunking", "format-html", "format-html-render", "format-pdf-pypdfium2"], git = "https://github.com/medjmalami/docling.git?rev=2b63ba80dafeed09d36efeccba347f7753f57810" },
     { name = "feedparser", specifier = ">=6.0.14" },
     { name = "requests", specifier = ">=2.34.2" },
 ]
