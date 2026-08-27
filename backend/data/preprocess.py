@@ -4,8 +4,8 @@ preprocess_arxiv_html.py
 
 Cleans arXiv HTML and inlines images as base64.
 - Strips arXiv website chrome (headers, footers, nav).
+- Wraps the <article> in a valid HTML document so Docling parses it correctly.
 - Replaces relative <img src> with base64 data URIs.
-- Writes cleaned HTML to preprocessed_html/ for Docling to parse.
 """
 
 import base64
@@ -87,7 +87,6 @@ def _process_one(html_path: Path) -> tuple[str, str, str]:
         # 1. Extract only the paper content
         article = soup.find("article", class_="ltx_document")
         if not article:
-            # Fallback to <main> if article isn't found
             article = soup.find("main") or soup
 
         # 2. Inline images
@@ -106,11 +105,18 @@ def _process_one(html_path: Path) -> tuple[str, str, str]:
                 b64 = base64.b64encode(data).decode("ascii")
                 img["src"] = f"data:{mime};base64,{b64}"
             else:
-                # Remove unresolvable images so Docling doesn't choke
                 img.decompose()
 
-        # 3. Save cleaned HTML
-        out_path.write_text(str(article), encoding="utf-8")
+        # 3. Wrap in a full valid HTML document!
+        clean_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>{arxiv_id}</title></head>
+<body>
+{str(article)}
+</body>
+</html>"""
+
+        out_path.write_text(clean_html, encoding="utf-8")
         return arxiv_id, "success", ""
 
     except Exception as e:
