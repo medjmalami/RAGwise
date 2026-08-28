@@ -1890,6 +1890,7 @@ dependencies = [
     { name = "docling-parse" },
     { name = "docling-slim", extra = ["convert-core", "extract-core", "feat-chunking", "format-html", "format-html-render", "format-pdf-pypdfium2"] },
     { name = "feedparser" },
+    { name = "python-dotenv" },
     { name = "requests" },
 ]
 
@@ -1900,6 +1901,7 @@ requires-dist = [
     { name = "docling-parse", specifier = ">=7.15.0" },
     { name = "docling-slim", extras = ["convert-core", "docling-parse", "extract-core", "feat-chunking", "format-html", "format-html-render", "format-pdf-pypdfium2"], git = "https://github.com/medjmalami/docling.git?rev=2b63ba80dafeed09d36efeccba347f7753f57810" },
     { name = "feedparser", specifier = ">=6.0.14" },
+    { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "requests", specifier = ">=2.34.2" },
 ]
 
