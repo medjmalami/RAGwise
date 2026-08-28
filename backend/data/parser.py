@@ -41,7 +41,7 @@ def build_picture_description_options(api_key: str, model: str):
             "IMPORTANT: Output ONLY the final description. "
             "DO NOT include any reasoning, chain-of-thought, or <thought> tags."
         ),
-        timeout=120,  # Increased from 90 to 120 seconds
+        timeout=300,
     )
 
 
