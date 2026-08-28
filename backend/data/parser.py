@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -92,6 +93,12 @@ def main():
         action="store_true",
         help="Disable picture-description enrichment (parse only, no API calls).",
     )
+    # New flag to force re-processing even if output exists
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-processing of papers even if output JSON/MD already exist.",
+    )
 
     args = parser.parse_args()
 
@@ -173,6 +180,15 @@ def main():
         paper_output_dir = output_dir / paper_id
         paper_output_dir.mkdir(parents=True, exist_ok=True)
 
+        md_path = paper_output_dir / f"{paper_id}.md"
+        json_path = paper_output_dir / f"{paper_id}.docling.json"
+
+        # --- RESUME CAPABILITY ---
+        # If the output files already exist and --force is not used, skip this paper.
+        if json_path.exists() and md_path.exists() and not args.force:
+            print(f"\nSkipping {paper_id} (already processed).")
+            continue
+
         artifacts_dir = paper_output_dir / "artifacts"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -181,9 +197,6 @@ def main():
         try:
             conv_res = doc_converter.convert(html_path)
             doc = conv_res.document
-
-            md_path = paper_output_dir / f"{paper_id}.md"
-            json_path = paper_output_dir / f"{paper_id}.docling.json"
 
             # 1. SAVE MARKDOWN
             save_md_kwargs = {"image_mode": ImageRefMode.REFERENCED}
@@ -223,7 +236,6 @@ def main():
                     r'"data":\s*"[A-Za-z0-9+/=]+",', '"data": null,', json_content
                 )
                 # Strip out <thought> blocks (both closed and truncated/unclosed)
-                # in case the VLM ignored the prompt constraints
                 json_content = re.sub(
                     r"<thought>.*?(?:</thought>|$)", "", json_content, flags=re.DOTALL
                 )
@@ -251,12 +263,32 @@ def main():
                 md_path.write_text(md_content, encoding="utf-8")
                 print(f"  Cleaned up Markdown image paths and sanitized descriptions.")
 
+            # --- RATE LIMITING ---
+            # Sleep 2 seconds after each successful paper to stay safely under
+            # the 30 RPM limit (since SimplePipeline is sequential).
+            if gemini_api_key:
+                time.sleep(2)
+
         except Exception as e:
             print(f"  Error processing {paper_id}: {e}")
             import traceback
 
             traceback.print_exc()
             failures.append(paper_id)
+
+            # --- DAILY LIMIT DETECTION ---
+            # If we hit the 14.4k RPD limit or rate limits, stop the script gracefully.
+            err_str = str(e).lower()
+            if (
+                "429" in err_str
+                or "resource has been exhausted" in err_str
+                or "rate limit" in err_str
+            ):
+                print("\n[FATAL] Hit API rate limit or daily quota. Stopping script.")
+                print(
+                    "You can rerun this exact command tomorrow and it will resume automatically."
+                )
+                sys.exit(1)
 
     succeeded = len(html_files) - len(failures)
     print(f"\nDone. {succeeded}/{len(html_files)} succeeded.")
