@@ -29,7 +29,7 @@ def build_picture_description_options(api_key: str, model: str):
         headers={"Authorization": f"Bearer {api_key}"},
         params=dict(
             model=model,
-            max_tokens=1024,  # Increased from 400 so the model can finish thinking and output the final answer
+            max_tokens=1024,
             temperature=0.1,
         ),
         prompt=(
@@ -41,7 +41,7 @@ def build_picture_description_options(api_key: str, model: str):
             "IMPORTANT: Output ONLY the final description. "
             "DO NOT include any reasoning, chain-of-thought, or <thought> tags."
         ),
-        timeout=90,
+        timeout=120,  # Increased from 90 to 120 seconds
     )
 
 
@@ -55,7 +55,7 @@ def build_convert_pipeline_options(api_key: str, model: str):
     return ConvertPipelineOptions(
         do_picture_description=True,
         picture_description_options=build_picture_description_options(api_key, model),
-        enable_remote_services=True,  # required whenever the target is a remote API
+        enable_remote_services=True,
     )
 
 
@@ -84,16 +84,13 @@ def main():
         type=str,
         default="gemma-4-26b-a4b-it",
         choices=["gemma-4-26b-a4b-it", "gemma-4-31b-it"],
-        help="Gemma 4 model to use for picture description, as exposed by "
-        "the Gemini API (default: gemma-4-26b-a4b-it, the cheaper/faster MoE "
-        "model; gemma-4-31b-it is the stronger dense model).",
+        help="Gemma 4 model to use for picture description.",
     )
     parser.add_argument(
         "--no-picture-description",
         action="store_true",
-        help="Disable picture-description enrichment (parse only, no API calls).",
+        help="Disable picture-description enrichment.",
     )
-    # New flag to force re-processing even if output exists
     parser.add_argument(
         "--force",
         action="store_true",
@@ -122,8 +119,7 @@ def main():
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             print(
-                "Error: GEMINI_API_KEY is not set. Export it, or pass "
-                "--no-picture-description to skip image descriptions."
+                "Error: GEMINI_API_KEY is not set. Export it, or pass --no-picture-description."
             )
             sys.exit(1)
 
@@ -144,9 +140,7 @@ def main():
         "max_image_data_base64_bytes"
         in inspect.signature(HTMLBackendOptions).parameters
     ):
-        html_options_kwargs["max_image_data_base64_bytes"] = (
-            100 * 1024 * 1024
-        )  # 100MB limit
+        html_options_kwargs["max_image_data_base64_bytes"] = 100 * 1024 * 1024
     html_options = HTMLBackendOptions(**html_options_kwargs)
 
     # 2. Setup enrichment (picture description) pipeline options, if enabled.
@@ -184,7 +178,6 @@ def main():
         json_path = paper_output_dir / f"{paper_id}.docling.json"
 
         # --- RESUME CAPABILITY ---
-        # If the output files already exist and --force is not used, skip this paper.
         if json_path.exists() and md_path.exists() and not args.force:
             print(f"\nSkipping {paper_id} (already processed).")
             continue
@@ -194,10 +187,40 @@ def main():
 
         print(f"\nProcessing {paper_id}...")
 
-        try:
-            conv_res = doc_converter.convert(html_path)
-            doc = conv_res.document
+        # --- RETRY LOGIC FOR NETWORK TIMEOUTS ---
+        max_retries = 3
+        success = False
+        for attempt in range(1, max_retries + 1):
+            try:
+                conv_res = doc_converter.convert(html_path)
+                doc = conv_res.document
+                success = True
+                break  # Exit retry loop on success
+            except Exception as e:
+                err_str = str(e).lower()
+                # If we hit the daily limit, stop the entire script immediately
+                if "429" in err_str or "resource has been exhausted" in err_str:
+                    print("\n[FATAL] Hit API daily quota. Stopping script.")
+                    print(
+                        "You can rerun this exact command tomorrow and it will resume automatically."
+                    )
+                    sys.exit(1)
 
+                print(f"  Attempt {attempt}/{max_retries} failed: {e}")
+                if attempt < max_retries:
+                    print(f"  Waiting 15 seconds before retrying...")
+                    time.sleep(15)
+
+        if not success:
+            print(
+                f"  Failed to process {paper_id} after {max_retries} attempts. Skipping."
+            )
+            failures.append(paper_id)
+            time.sleep(5)  # Brief pause before moving to the next paper
+            continue
+
+        # --- PROCESSING & SAVING ---
+        try:
             # 1. SAVE MARKDOWN
             save_md_kwargs = {"image_mode": ImageRefMode.REFERENCED}
             sig_md_params = inspect.signature(doc.save_as_markdown).parameters
@@ -231,17 +254,13 @@ def main():
                 json_content = json_content.replace(
                     f"{paper_id}_artifacts/", "artifacts/"
                 )
-                # Clear any remaining base64 payloads
                 json_content = re.sub(
                     r'"data":\s*"[A-Za-z0-9+/=]+",', '"data": null,', json_content
                 )
-                # Strip out <thought> blocks (both closed and truncated/unclosed)
                 json_content = re.sub(
                     r"<thought>.*?(?:</thought>|$)", "", json_content, flags=re.DOTALL
                 )
-                # Clean up any stray newline artifacts left behind by the regex
                 json_content = re.sub(r"\n\s*\n\s*", "\n", json_content)
-
                 json_path.write_text(json_content, encoding="utf-8")
                 print(
                     f"  Cleaned up JSON paths, stripped base64, and sanitized descriptions."
@@ -256,7 +275,6 @@ def main():
                     md_content,
                 )
                 md_content = md_content.replace(f"{paper_id}_artifacts/", "artifacts/")
-                # Strip out <thought> blocks from markdown as well
                 md_content = re.sub(
                     r"<thought>.*?(?:</thought>|$)", "", md_content, flags=re.DOTALL
                 )
@@ -264,31 +282,16 @@ def main():
                 print(f"  Cleaned up Markdown image paths and sanitized descriptions.")
 
             # --- RATE LIMITING ---
-            # Sleep 2 seconds after each successful paper to stay safely under
-            # the 30 RPM limit (since SimplePipeline is sequential).
             if gemini_api_key:
                 time.sleep(2)
 
         except Exception as e:
-            print(f"  Error processing {paper_id}: {e}")
+            print(f"  Error saving/cleaning {paper_id}: {e}")
             import traceback
 
             traceback.print_exc()
             failures.append(paper_id)
-
-            # --- DAILY LIMIT DETECTION ---
-            # If we hit the 14.4k RPD limit or rate limits, stop the script gracefully.
-            err_str = str(e).lower()
-            if (
-                "429" in err_str
-                or "resource has been exhausted" in err_str
-                or "rate limit" in err_str
-            ):
-                print("\n[FATAL] Hit API rate limit or daily quota. Stopping script.")
-                print(
-                    "You can rerun this exact command tomorrow and it will resume automatically."
-                )
-                sys.exit(1)
+            time.sleep(2)
 
     succeeded = len(html_files) - len(failures)
     print(f"\nDone. {succeeded}/{len(html_files)} succeeded.")
