@@ -11,3 +11,4 @@ wheels/
 arxiv_rag_papers/
 docling/
 manifest.jsonl
+.env
