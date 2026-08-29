@@ -281,10 +281,6 @@ def main():
                 md_path.write_text(md_content, encoding="utf-8")
                 print(f"  Cleaned up Markdown image paths and sanitized descriptions.")
 
-            # --- RATE LIMITING ---
-            if gemini_api_key:
-                time.sleep(2)
-
         except Exception as e:
             print(f"  Error saving/cleaning {paper_id}: {e}")
             import traceback
