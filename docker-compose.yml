@@ -1,0 +1,26 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage:z
+      - ./production.yaml:/qdrant/config/production.yaml:ro
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__LOG_LEVEL: INFO
+    # Uncomment to require an API key even on localhost (recommended once other
+    # services on your machine can reach this port):
+    # QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+networks:
+  default:
+    name: qdrant-net
