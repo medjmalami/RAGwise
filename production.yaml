@@ -1,0 +1,9 @@
+log_level: INFO
+
+storage:
+  # On-disk payload storage keeps RAM usage down as your corpus grows past a few thousand chunks.
+  on_disk_payload: true
+
+service:
+  # Increase if you batch-upsert large payloads (e.g. full chunk text + metadata).
+  max_request_size_mb: 64
