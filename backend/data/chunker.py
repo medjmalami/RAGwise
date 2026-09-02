@@ -106,42 +106,64 @@ def extract_headings(chunk):
     return list(headings) if headings else []
 
 
-def resolve_image_path(item, paper_dir: Path, input_dir: Path):
-    """Resolve a PictureItem's stored image URI to an actual file on disk,
-    relative to --input, so a chunk can be read straight off disk later
-    without re-opening the paper's .docling.json to look up the ref.
-
-    Stage 1 saved images with ImageRefMode.REFERENCED and only stripped the
-    embedded base64 `data` field from the JSON — the `uri` (relative path
-    under artifacts/) is still intact on the loaded doc item.
+def build_picture_uri_map(json_path: Path):
+    """Read the paper's raw .docling.json directly and map each picture's
+    self_ref to its stored image URI. Reading the raw JSON (rather than the
+    loaded DoclingDocument's .image attribute) sidesteps a validation quirk
+    where the `image` field wasn't reliably surviving `load_from_json()` on
+    this docling_core version, even though it's clearly present in the file.
     """
-    image_ref = getattr(item, "image", None)
-    if image_ref is None:
-        return None
-    uri = getattr(image_ref, "uri", None)
-    if not uri:
-        return None
+    try:
+        raw = json.loads(json_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
-    uri_str = str(uri)
+    uri_by_ref = {}
+    for pic in raw.get("pictures", []) or []:
+        self_ref = pic.get("self_ref")
+        uri = (pic.get("image") or {}).get("uri")
+        if self_ref and uri:
+            uri_by_ref[self_ref] = uri
+    return uri_by_ref
+
+
+def resolve_image_path(uri_str, paper_dir: Path, input_dir: Path):
+    """Resolve a stored image URI to a real file, relative to --input.
+
+    The URI Stage 1 wrote can be an absolute path from whatever machine/run
+    produced it (fragile — breaks if the dataset moves). So beyond trying it
+    as-is, this also falls back to just the filename joined against this
+    paper's own artifacts/ directory, which is where Stage 1 actually put
+    the image and is stable regardless of what path got baked into the JSON.
+    """
+    if not uri_str:
+        return None
+    uri_str = str(uri_str)
     if uri_str.startswith("file://"):
         uri_str = uri_str[len("file://") :]
 
-    candidate = (paper_dir / uri_str).resolve()
-    if not candidate.exists():
-        # Fall back to interpreting the uri as already-absolute.
-        candidate = Path(uri_str)
+    filename = Path(uri_str).name
+    candidates = [
+        Path(uri_str) if Path(uri_str).is_absolute() else (paper_dir / uri_str),
+        paper_dir / "artifacts" / filename,
+    ]
 
-    if candidate.exists():
+    for candidate in candidates:
         try:
-            return str(candidate.relative_to(input_dir))
-        except ValueError:
-            return str(candidate)
-    # Couldn't resolve to a real file — return the raw uri so it's at least
-    # visible for debugging, rather than silently dropping it.
-    return uri_str
+            candidate = candidate.resolve()
+        except Exception:
+            continue
+        if candidate.exists():
+            try:
+                return str(candidate.relative_to(input_dir))
+            except ValueError:
+                return str(candidate)
+    return None
 
 
-def extract_doc_items(chunk, paper_dir: Path, input_dir: Path):
+def extract_doc_items(
+    chunk, paper_dir: Path, input_dir: Path, picture_uri_by_ref: dict
+):
     """Lightweight provenance: item type, page numbers, a stable ref back
     into the source DoclingDocument, and (for pictures) the resolved image
     file path — enough to trace a retrieved chunk back to its exact node,
@@ -176,7 +198,8 @@ def extract_doc_items(chunk, paper_dir: Path, input_dir: Path):
                 entry["pages"] = pages
 
         if str(entry["type"]).lower() in ("picture", "figure"):
-            image_path = resolve_image_path(item, paper_dir, input_dir)
+            uri_str = picture_uri_by_ref.get(self_ref) if self_ref else None
+            image_path = resolve_image_path(uri_str, paper_dir, input_dir)
             if image_path:
                 entry["image_path"] = image_path
 
@@ -323,6 +346,8 @@ def main():
             failures.append(paper_id)
             continue
 
+        picture_uri_by_ref = build_picture_uri_map(json_path)
+
         try:
             chunk_iter = chunker.chunk(dl_doc=doc)
             records = []
@@ -330,7 +355,9 @@ def main():
                 text = get_chunk_text(chunker, chunk)
                 if not text or len(text.strip()) < args.min_chunk_chars:
                     continue
-                doc_items = extract_doc_items(chunk, paper_dir, input_dir)
+                doc_items = extract_doc_items(
+                    chunk, paper_dir, input_dir, picture_uri_by_ref
+                )
                 records.append(
                     {
                         # chunk_id/chunk_index/num_chunks are filled in below,
