@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -257,7 +258,7 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=8,
+        default=4,
         help="Embedding forward batch size. Keep small on a 4GB-VRAM GPU.",
     )
     parser.add_argument(
@@ -289,6 +290,19 @@ def main():
         help="Re-embed papers that already have a marker file.",
     )
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--cooldown-seconds",
+        type=float,
+        default=0,
+        help="Sleep this many seconds after every --cooldown-every paper(s), so the GPU gets "
+        "real idle time between bursts instead of running continuously. 0 disables it.",
+    )
+    parser.add_argument(
+        "--cooldown-every",
+        type=int,
+        default=1,
+        help="How many papers to process between cooldown sleeps (default: every paper).",
+    )
 
     args = parser.parse_args()
 
@@ -357,7 +371,7 @@ def main():
     total_points = 0
     papers_done = 0
 
-    for jsonl_path in jsonl_files:
+    for file_index, jsonl_path in enumerate(jsonl_files):
         paper_id = jsonl_path.stem.removesuffix(".chunks")
         if not paper_id or paper_id == jsonl_path.stem:
             paper_id = jsonl_path.parent.name
@@ -413,6 +427,15 @@ def main():
         total_points += len(points)
         papers_done += 1
         print(f"  Upserted {len(points)} points.")
+
+        is_last_file = file_index == len(jsonl_files) - 1
+        if (
+            args.cooldown_seconds > 0
+            and not is_last_file
+            and papers_done % args.cooldown_every == 0
+        ):
+            print(f"  Cooling down for {args.cooldown_seconds:.0f}s...")
+            time.sleep(args.cooldown_seconds)
 
     if skipped:
         print(f"\nSkipped {skipped} already-embedded papers.")
