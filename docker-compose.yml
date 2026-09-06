@@ -16,6 +16,10 @@ services:
     # Uncomment to require an API key even on localhost (recommended once other
     # services on your machine can reach this port):
     # QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     deploy:
       resources:
         limits:
