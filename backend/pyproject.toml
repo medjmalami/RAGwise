@@ -10,7 +10,9 @@ dependencies = [
     "docling-parse>=7.15.0",
     "docling-slim[convert-core,docling-parse,extract-core,feat-chunking,format-html,format-html-render,format-pdf-pypdfium2]",
     "feedparser>=6.0.14",
+    "flagembedding>=1.4.2",
     "python-dotenv>=1.2.3",
+    "qdrant-client>=1.19.0",
     "requests>=2.34.2",
 ]
 
