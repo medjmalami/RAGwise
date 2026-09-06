@@ -12,3 +12,5 @@ arxiv_rag_papers/
 docling/
 manifest.jsonl
 .env
+
+embed_state
