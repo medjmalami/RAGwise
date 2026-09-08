@@ -11,7 +11,7 @@ dependencies = [
     "docling-ibm-models>=3.14.0",
     "docling-parse>=7.15.0",
     "docling-slim[convert-core,docling-parse,extract-core,feat-chunking,format-html,format-html-render,format-pdf-pypdfium2]",
-    "fastapi>=0.141.1",
+    "fastapi[standard]>=0.141.1",
     "feedparser>=6.0.14",
     "flagembedding>=1.4.2",
     "pydantic-settings>=2.15.0",
