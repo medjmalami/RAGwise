@@ -1,4 +1,29 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ragwise-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    # Don't expose PostgreSQL publicly.
+    # Backend accesses it through Docker's network.
+    ports:
+      - "5432:5432"
+
+
   qdrant:
     image: qdrant/qdrant:v1.12.4
     container_name: qdrant
