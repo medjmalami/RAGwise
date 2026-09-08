@@ -5,15 +5,20 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.19.2",
+    "asyncpg>=0.31.0",
     "beautifulsoup4>=4.15.0",
     "docling-ibm-models>=3.14.0",
     "docling-parse>=7.15.0",
     "docling-slim[convert-core,docling-parse,extract-core,feat-chunking,format-html,format-html-render,format-pdf-pypdfium2]",
+    "fastapi>=0.141.1",
     "feedparser>=6.0.14",
     "flagembedding>=1.4.2",
     "python-dotenv>=1.2.3",
     "qdrant-client>=1.19.0",
     "requests>=2.34.2",
+    "sqlalchemy[asyncio]>=2.0.52",
+    "uvicorn>=0.52.4",
 ]
 
 [tool.uv.sources]
