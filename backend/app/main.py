@@ -1,16 +1,14 @@
 import os
 from contextlib import asynccontextmanager
 
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_google_genai import ChatGoogleGenerativeAI
 from qdrant_client import QdrantClient
 
+from app.config import settings
 from app.routes.routes import router
 from app.services.retrieve_from_qdrant import QueryEmbedder
-
-load_dotenv()
 
 
 @asynccontextmanager
@@ -33,7 +31,7 @@ async def lifespan(app: FastAPI):
     app.state.llm = ChatGoogleGenerativeAI(
         model="gemma-4-31b-it",
         temperature=0.2,
-        google_api_key=os.environ.get("GEMINI_API_KEY"),
+        google_api_key=settings.gemini_api_key,
     )
 
     yield  # Server runs here, handling requests
