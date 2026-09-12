@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
     print("Initializing Gemini LLM...")
     # 3. Use GEMINI_API_KEY instead of GOOGLE_API_KEY
     app.state.llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemma-4-31b-it",
         temperature=0.2,
         google_api_key=os.environ.get("GEMINI_API_KEY"),
     )
