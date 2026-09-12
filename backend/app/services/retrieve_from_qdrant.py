@@ -18,9 +18,17 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from qdrant_client import QdrantClient, models
+
+# FlagEmbedding/torch/numpy are heavy imports, so they're loaded lazily at
+# runtime inside QueryEmbedder.load(). This TYPE_CHECKING import gives the
+# type checker real symbols for annotations/casts without paying that cost
+# at import time.
+if TYPE_CHECKING:
+    import numpy as np
+    from FlagEmbedding import BGEM3FlagModel
 
 DENSE_DIM = 1024
 DEFAULT_COLLECTION = "ragwise_arxiv"
@@ -43,7 +51,7 @@ class QueryEmbedder:
     device: Optional[str] = None  # None → auto (cuda if available else cpu)
     use_fp16: bool = True  # Ignored on CPU.
     max_length: int = DEFAULT_MAX_LENGTH
-    _model: Any = field(default=None, init=False, repr=False)
+    _model: Optional["BGEM3FlagModel"] = field(default=None, init=False, repr=False)
 
     def load(self) -> "QueryEmbedder":
         import torch
@@ -56,9 +64,18 @@ class QueryEmbedder:
         return self
 
     @property
-    def model(self):
+    def model(self) -> "BGEM3FlagModel":
         if self._model is None:
             self.load()
+        # Re-check explicitly (rather than trusting the branch above) so the
+        # type checker re-narrows self._model to non-None here, instead of
+        # inferring across the self.load() call — that cross-call inference
+        # is what was collapsing this property's return type to None.
+        if self._model is None:
+            raise RuntimeError(
+                f"Failed to load {self.model_name}: self._model is still None "
+                "after calling load()."
+            )
         return self._model
 
 
@@ -105,14 +122,23 @@ def embed_query(
         return_colbert_vecs=False,
     )
 
-    dense = out["dense_vecs"][0]
+    # BGEM3FlagModel.encode()'s return annotation is a plain Dict[str, ...]
+    # with one Union value type shared across every key, rather than a
+    # TypedDict with a distinct type per key. So the checker treats
+    # out["dense_vecs"][0] as possibly being the same type as
+    # out["lexical_weights"][0] (a Dict[str, float]) — hence "tolist" not
+    # existing on that branch. Which key holds which shape is fixed by the
+    # return_dense/return_sparse flags we passed above, so cast each
+    # extraction to what's actually there.
+    dense = cast("np.ndarray", out["dense_vecs"])[0]
     dense = dense.tolist() if hasattr(dense, "tolist") else list(dense)
 
     result: dict = {"dense": dense}
     if return_sparse:
         # BGE-M3 returns {token_id_str: weight}; keep that shape here and
         # convert to Qdrant's SparseVector only at retrieval time.
-        result["sparse"] = out["lexical_weights"][0] or {}
+        lexical_weights = cast("list[dict[str, float]]", out["lexical_weights"])
+        result["sparse"] = lexical_weights[0] or {}
     return result
 
 
