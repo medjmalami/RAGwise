@@ -19,6 +19,7 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.3",
     "qdrant-client>=1.19.0",
+    "ragas>=0.4.3",
     "requests>=2.34.2",
     "sqlalchemy[asyncio]>=2.0.52",
     "uvicorn>=0.52.4",
