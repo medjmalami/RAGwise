@@ -14,15 +14,18 @@ dependencies = [
     "fastapi[standard]>=0.141.1",
     "feedparser>=6.0.14",
     "flagembedding>=1.4.2",
-    "langchain-core>=1.6.3",
+    "langchain-core>=0.3.0",
     "langchain-google-genai>=4.4.0",
+    "langchain-huggingface>=1.2.2",
     "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.3",
     "qdrant-client>=1.19.0",
-    "ragas>=0.4.3",
+    "ragas>=0.4,<0.5",
+    "langchain-community<0.4.2",
     "requests>=2.34.2",
     "sqlalchemy[asyncio]>=2.0.52",
     "uvicorn>=0.52.4",
+    "rapidfuzz>=3.14.6",
 ]
 
 [tool.uv.sources]
