@@ -11,9 +11,6 @@ from ragas.run_config import RunConfig
 from ragas.testset import Testset, TestsetGenerator
 from ragas.testset.graph import KnowledgeGraph, Node, NodeType
 from ragas.testset.transforms import apply_transforms, default_transforms
-from ragas.testset.transforms.default import default_transforms_for_prechunked
-
-from app.config import settings
 
 # --- CONFIGURATION ---
 os.environ.setdefault("GOOGLE_API_KEY", settings.gemini_api_key)
@@ -88,7 +85,7 @@ kg = KnowledgeGraph()
 for doc in docs:
     kg.nodes.append(
         Node(
-            type=NodeType.CHUNK,
+            type=NodeType.DOCUMENT,
             properties={
                 "page_content": doc.page_content,
                 "document_metadata": doc.metadata,
@@ -107,7 +104,8 @@ generator_embeddings = LangchainEmbeddingsWrapper(
 )
 
 print("Applying transforms to Knowledge Graph (this may take a while)...")
-transforms = default_transforms_for_prechunked(
+transforms = default_transforms(
+    documents=docs,
     llm=generator_llm,
     embedding_model=generator_embeddings,
 )
