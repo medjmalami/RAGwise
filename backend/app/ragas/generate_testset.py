@@ -3,15 +3,13 @@ import logging
 import os
 import sys
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_ollama import ChatOllama
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.llms import LangchainLLMWrapper
 from ragas.run_config import RunConfig
 from ragas.testset import Testset, TestsetGenerator
 from ragas.testset.graph import KnowledgeGraph
-
-from app.config import settings
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -41,8 +39,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        default="gemini-3.1-flash-lite",
-        help="Gemini model name used as the generator LLM.",
+        default="gemma4:31b-cloud",
+        help="Ollama model tag used as the generator LLM (e.g. a '*-cloud' tag "
+        "to run on Ollama's cloud instead of locally).",
+    )
+    parser.add_argument(
+        "--ollama-base-url",
+        default="http://localhost:11434",
+        help="Base URL of the local Ollama daemon (it forwards '-cloud' tags "
+        "to Ollama's cloud service automatically).",
     )
     parser.add_argument(
         "--embedding-model",
@@ -78,18 +83,16 @@ def load_knowledge_graph(kg_path: str) -> KnowledgeGraph:
 def main() -> None:
     args = parse_args()
 
-    if not os.environ.get("GOOGLE_API_KEY", settings.gemini_api_key):
-        logger.warning("GOOGLE_API_KEY is not set; the Gemini call will likely fail.")
-
     kg = load_knowledge_graph(args.kg_path)
 
     logger.info(
-        "Setting up generator LLM (%s) and embeddings (%s) ...",
+        "Setting up generator LLM (%s via %s) and embeddings (%s) ...",
         args.model,
+        args.ollama_base_url,
         args.embedding_model,
     )
     generator_llm = LangchainLLMWrapper(
-        ChatGoogleGenerativeAI(model=args.model, google_api_key=settings.gemini_api_key)
+        ChatOllama(model=args.model, base_url=args.ollama_base_url)
     )
     generator_embeddings = LangchainEmbeddingsWrapper(
         HuggingFaceEmbeddings(
