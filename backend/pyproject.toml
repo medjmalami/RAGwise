@@ -26,6 +26,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.52",
     "uvicorn>=0.52.4",
     "rapidfuzz>=3.14.6",
+    "langchain-ollama>=1.1.0",
 ]
 
 [tool.uv.sources]
