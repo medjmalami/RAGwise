@@ -12,8 +12,10 @@ import shutil
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
+from pydantic import AnyUrl
 
 load_dotenv()
 
@@ -25,7 +27,9 @@ def build_picture_description_options(api_key: str, model: str):
     from docling.datamodel.pipeline_options import PictureDescriptionApiOptions
 
     return PictureDescriptionApiOptions(
-        url="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        url=AnyUrl(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        ),
         headers={"Authorization": f"Bearer {api_key}"},
         params=dict(
             model=model,
@@ -129,13 +133,13 @@ def main():
         from docling.datamodel.base_models import InputFormat
         from docling.document_converter import DocumentConverter, FormatOption
         from docling.pipeline.simple_pipeline import SimplePipeline
-        from docling_core.types.doc import ImageRefMode
+        from docling_core.types.doc.base import ImageRefMode
     except ImportError as e:
         print(f"Error importing Docling components: {e}")
         sys.exit(1)
 
     # 1. Setup HTML backend options
-    html_options_kwargs = {"fetch_images": True}
+    html_options_kwargs: dict[str, Any] = {"fetch_images": True}
     if (
         "max_image_data_base64_bytes"
         in inspect.signature(HTMLBackendOptions).parameters
@@ -189,12 +193,11 @@ def main():
 
         # --- RETRY LOGIC FOR NETWORK TIMEOUTS ---
         max_retries = 3
-        success = False
+        doc = None  # reset per paper; also makes `doc` always bound
         for attempt in range(1, max_retries + 1):
             try:
                 conv_res = doc_converter.convert(html_path)
                 doc = conv_res.document
-                success = True
                 break  # Exit retry loop on success
             except Exception as e:
                 err_str = str(e).lower()
@@ -208,10 +211,10 @@ def main():
 
                 print(f"  Attempt {attempt}/{max_retries} failed: {e}")
                 if attempt < max_retries:
-                    print(f"  Waiting 15 seconds before retrying...")
+                    print("  Waiting 15 seconds before retrying...")
                     time.sleep(15)
 
-        if not success:
+        if doc is None:
             print(
                 f"  Failed to process {paper_id} after {max_retries} attempts. Skipping."
             )
@@ -222,7 +225,7 @@ def main():
         # --- PROCESSING & SAVING ---
         try:
             # 1. SAVE MARKDOWN
-            save_md_kwargs = {"image_mode": ImageRefMode.REFERENCED}
+            save_md_kwargs: dict[str, Any] = {"image_mode": ImageRefMode.REFERENCED}
             sig_md_params = inspect.signature(doc.save_as_markdown).parameters
             for p in ["image_dir", "artifacts_dir", "artifacts_path"]:
                 if p in sig_md_params:
@@ -231,7 +234,7 @@ def main():
             doc.save_as_markdown(md_path, **save_md_kwargs)
 
             # 2. SAVE JSON
-            save_json_kwargs = {"image_mode": ImageRefMode.REFERENCED}
+            save_json_kwargs: dict[str, Any] = {"image_mode": ImageRefMode.REFERENCED}
             sig_json_params = inspect.signature(doc.save_as_json).parameters
             for p in ["image_dir", "artifacts_dir", "artifacts_path"]:
                 if p in sig_json_params:
