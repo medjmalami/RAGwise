@@ -92,7 +92,10 @@ def _process_one(html_path: Path) -> tuple[str, str, str]:
         # 2. Inline images
         assets_dir = ASSETS_DIR / arxiv_id
         for img in article.find_all("img"):
-            src = (img.get("src") or "").strip()
+            raw_src = img.get("src")
+            if isinstance(raw_src, list):  # AttributeValueList is a list subclass
+                raw_src = raw_src[0] if raw_src else ""
+            src = (raw_src or "").strip()
             if not src or src.lower().startswith("data:"):
                 continue
             if src.startswith(("http://", "https://", "//")):
