@@ -7,6 +7,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from qdrant_client import QdrantClient
 
 from app.config import settings
+from app.graph.rag_graph import build_rag_graph
 from app.routes.routes import router
 from app.services.retrieve_from_qdrant import QueryEmbedder
 
@@ -32,6 +33,13 @@ async def lifespan(app: FastAPI):
         model="gemma-4-31b-it",
         temperature=0.2,
         google_api_key=settings.gemini_api_key,
+    )
+
+    print("Building RAG graph...")
+    app.state.rag_graph = build_rag_graph(
+        embedder=app.state.embedder,
+        client=app.state.qdrant_client,
+        llm=app.state.llm,
     )
 
     yield  # Server runs here, handling requests
