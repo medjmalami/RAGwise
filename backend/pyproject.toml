@@ -28,6 +28,7 @@ dependencies = [
     "rapidfuzz>=3.14.6",
     "langchain-ollama>=1.1.0",
     "langfuse>=4.15.4",
+    "langgraph>=1.2.11",
 ]
 
 [tool.uv.sources]
