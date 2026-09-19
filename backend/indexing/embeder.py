@@ -28,6 +28,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import cast
 
 # Fixed namespace so uuid5(CHUNK_ID_NAMESPACE, chunk_id) is stable across runs/machines.
 CHUNK_ID_NAMESPACE = uuid.UUID("d6e1b3c2-8f2a-4b7a-9c1d-2f6a7e9b0c3d")
@@ -104,9 +105,10 @@ def embed_texts(embedder, texts, batch_size, max_length, use_sparse):
         return_sparse=use_sparse,
         return_colbert_vecs=False,
     )
-    dense_vecs = [
-        v.tolist() if hasattr(v, "tolist") else list(v) for v in output["dense_vecs"]
-    ]
+    dense_vecs = cast(
+        "list[list[float]]",
+        [v.tolist() if hasattr(v, "tolist") else list(v) for v in output["dense_vecs"]],
+    )
     sparse_weights = output.get("lexical_weights") if use_sparse else None
     return dense_vecs, sparse_weights
 
@@ -400,8 +402,12 @@ def main():
             )
             points = []
             for i, record in enumerate(records):
-                vector = {"dense": dense_vecs[i]}
+                vector: dict[str, models.Vector] = {"dense": dense_vecs[i]}
                 if use_sparse:
+                    if sparse_weights is None:
+                        raise RuntimeError(
+                            "BGE-M3 returned no lexical weights but sparse is enabled."
+                        )
                     vector["sparse"] = to_sparse_vector(sparse_weights[i])
                 point_id = str(uuid.uuid5(CHUNK_ID_NAMESPACE, record["chunk_id"]))
                 points.append(
