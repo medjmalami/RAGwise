@@ -1,17 +1,13 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
-from qdrant_client import QdrantClient
 
 from app.controllers.controller import (
-    get_embedder,
-    get_llm,
-    get_qdrant_client,
+    get_rag_graph,
     handle_rag_answer,
 )
-from app.services.retrieve_from_qdrant import QueryEmbedder
 
 
 # ---------------------------------------------------------------------------
@@ -51,19 +47,12 @@ router = APIRouter()
 @router.post("/answer", response_model=QueryResponse)
 async def answer(
     request: QueryRequest,
-    embedder: QueryEmbedder = Depends(get_embedder),
-    client: QdrantClient = Depends(get_qdrant_client),
-    llm: ChatGoogleGenerativeAI = Depends(get_llm),
+    graph: CompiledStateGraph = Depends(get_rag_graph),
 ):
-    """
-    Retrieves top-k chunks and uses Gemini to generate an answer.
-    """
     return await handle_rag_answer(
         query=request.query,
         top_k=request.top_k,
         paper_id=request.paper_id,
         has_picture=request.has_picture,
-        embedder=embedder,
-        client=client,
-        llm=llm,
+        graph=graph,
     )
