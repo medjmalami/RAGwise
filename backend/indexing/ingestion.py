@@ -2,6 +2,7 @@ import json
 import mimetypes
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -166,7 +167,7 @@ def get_image_sources(html: str, paper_url: str):
     for img in image_tags:
         src = img.get("src")
 
-        if not src:
+        if not isinstance(src, str):
             continue
 
         src = src.strip()
@@ -474,7 +475,7 @@ def paper_images_are_complete(
 def process_paper(
     arxiv_id: str,
     session: requests.Session,
-):
+) -> dict[str, Any]:
     """
     Process one paper.
 
