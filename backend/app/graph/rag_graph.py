@@ -5,6 +5,7 @@ from typing import Optional, TypedDict
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -114,14 +115,15 @@ def build_rag_graph(
             raise RetrievalError(str(e)) from e
         return {"chunks": chunks}
 
-    async def generate(state: RAGState) -> dict:
+    async def generate(state: RAGState, config: RunnableConfig) -> dict:
         chunks = state.get("chunks", [])
         if not chunks:
             # Keeps the graph strictly linear: no LLM call when nothing was found.
             return {"answer": NO_DOCS_ANSWER}
         try:
             answer = await chain.ainvoke(
-                {"context": _format_context(chunks), "question": state["query"]}
+                {"context": _format_context(chunks), "question": state["query"]},
+                config=config,
             )
         except Exception as e:
             raise GenerationError(str(e)) from e

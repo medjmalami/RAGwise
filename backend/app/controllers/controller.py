@@ -1,6 +1,8 @@
 from typing import Optional
 
 from fastapi import HTTPException, Request
+from langfuse import propagate_attributes
+from langfuse.langchain import CallbackHandler
 from langgraph.graph.state import CompiledStateGraph
 
 from app.graph.rag_graph import GenerationError, RetrievalError
@@ -20,15 +22,26 @@ async def handle_rag_answer(
     if not query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    handler = CallbackHandler()
     try:
-        result = await graph.ainvoke(
-            {
-                "query": query,
-                "top_k": top_k,
-                "paper_id": paper_id,
-                "has_picture": has_picture,
-            }
-        )
+        with propagate_attributes(
+            trace_name="rag-answer",
+            tags=["rag"],
+            metadata={
+                "top_k": str(top_k),
+                "paper_id": paper_id or "none",
+                "has_picture": str(has_picture),
+            },
+        ):
+            result = await graph.ainvoke(
+                {
+                    "query": query,
+                    "top_k": top_k,
+                    "paper_id": paper_id,
+                    "has_picture": has_picture,
+                },
+                config={"callbacks": [handler]},
+            )
     except RetrievalError as e:
         raise HTTPException(status_code=500, detail=f"Retrieval failed: {e}")
     except GenerationError as e:
