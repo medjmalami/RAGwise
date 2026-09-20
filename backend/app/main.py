@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langfuse import Langfuse, get_client
 from qdrant_client import QdrantClient
 
 from app.config import settings
@@ -15,6 +16,12 @@ from app.services.retrieve_from_qdrant import QueryEmbedder
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- STARTUP ---
+    print("Initializing Langfuse...")
+    Langfuse(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        base_url=settings.langfuse_base_url,
+    )
     print("Starting up: Loading BGE-M3 model...")
     app.state.embedder = QueryEmbedder()
     app.state.embedder.load()
@@ -47,6 +54,7 @@ async def lifespan(app: FastAPI):
     # --- SHUTDOWN ---
     print("Shutting down: Closing Qdrant connection...")
     app.state.qdrant_client.close()
+    get_client().shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
