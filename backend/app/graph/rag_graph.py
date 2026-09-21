@@ -7,6 +7,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from qdrant_client import QdrantClient, models
@@ -94,7 +95,7 @@ def _format_context(chunks: list[dict]) -> str:
 def build_rag_graph(
     embedder: QueryEmbedder,
     client: QdrantClient,
-    llm: ChatGoogleGenerativeAI,
+    llm: ChatOllama,
 ) -> CompiledStateGraph:
     chain = PROMPT | llm | StrOutputParser()
 
