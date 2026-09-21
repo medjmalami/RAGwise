@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langfuse import Langfuse, get_client
 from qdrant_client import QdrantClient
 
@@ -35,11 +35,10 @@ async def lifespan(app: FastAPI):
     )
 
     print("Initializing Gemini LLM...")
-    # 3. Use GEMINI_API_KEY instead of GOOGLE_API_KEY
-    app.state.llm = ChatGoogleGenerativeAI(
-        model="gemma-4-31b-it",
+
+    app.state.llm = ChatOllama(
+        model="gemma4:31b-cloud",
         temperature=0.2,
-        google_api_key=settings.gemini_api_key,
     )
 
     print("Building RAG graph...")
