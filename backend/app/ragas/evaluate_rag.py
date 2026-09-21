@@ -60,7 +60,7 @@ OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
 
 # ResponseRelevancy needs an embedding model: BGE-M3 from the local HF cache.
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-m3")
-EMBED_DEVICE = os.environ.get("EMBED_DEVICE", "cpu")
+EMBED_DEVICE = os.environ.get("EMBED_DEVICE", "cuda")
 
 
 # ---------------------------------------------------------------------------
