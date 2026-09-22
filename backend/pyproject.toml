@@ -15,7 +15,6 @@ dependencies = [
     "feedparser>=6.0.14",
     "flagembedding>=1.4.2",
     "langchain-core>=0.3.0",
-    "langchain-google-genai>=4.4.0",
     "langchain-huggingface>=1.2.2",
     "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.3",
