@@ -2,8 +2,8 @@ import os
 import random
 
 from langchain_core.documents import Document
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_ollama import ChatOllama
 from qdrant_client import QdrantClient
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.llms import LangchainLLMWrapper
@@ -25,7 +25,6 @@ SAMPLE_SIZE = 200
 TESTSET_SIZE = 10
 OUTPUT_CSV = "ragas_test_set.csv"
 KG_CACHE_PATH = "knowledge_graph.json"
-GEMINI_MODEL = "gemma-4-31b-it"
 
 RUN_CONFIG = RunConfig(max_workers=3, max_wait=90, max_retries=8)
 
@@ -97,7 +96,7 @@ for doc in docs:
 
 # --- 4. APPLY TRANSFORMS ---
 print("Initializing Google LLM and BGE-M3 embedder...")
-generator_llm = LangchainLLMWrapper(ChatGoogleGenerativeAI(model=GEMINI_MODEL))
+generator_llm = LangchainLLMWrapper(ChatOllama(model="gemma4:31b-cloud"))
 generator_embeddings = LangchainEmbeddingsWrapper(
     HuggingFaceEmbeddings(
         model_name="BAAI/bge-m3",
