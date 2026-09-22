@@ -29,6 +29,7 @@ dependencies = [
     "langchain-ollama>=1.1.0",
     "langfuse>=4.15.4",
     "langgraph>=1.2.11",
+    "cohere>=7.1.1",
 ]
 
 [tool.uv.sources]
