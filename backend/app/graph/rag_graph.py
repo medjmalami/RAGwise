@@ -64,6 +64,7 @@ class RAGState(_RAGInput, total=False):
     candidates: list[dict]  # slim metadata of the 50 hybrid candidates (pre-rerank)
     chunks: list[dict]  # Cohere top_k, full chunks
     answer: str
+    rerank_fallback: bool
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +140,7 @@ def build_rag_graph(
         # and you can see how far Cohere moved each one.
         for rank, c in enumerate(candidates, 1):
             c["hybrid_rank"] = rank
+        rerank_fallback = False
         try:
             chunks = await reranker.rerank(
                 query=state["query"], chunks=candidates, top_n=top_k
@@ -146,9 +148,12 @@ def build_rag_graph(
         except Exception:
             logger.exception("Cohere rerank failed; falling back to hybrid order")
             chunks = candidates[:top_k]
+            rerank_fallback = True
+
         return {
             "candidates": [_slim_candidate(c) for c in candidates],
             "chunks": chunks,
+            "rerank_fallback": rerank_fallback,
         }
 
     async def generate(state: RAGState, config: RunnableConfig) -> dict:
