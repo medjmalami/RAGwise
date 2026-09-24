@@ -10,6 +10,7 @@ from qdrant_client import QdrantClient
 from app.config import settings
 from app.graph.rag_graph import build_rag_graph
 from app.routes.routes import router
+from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder
 
 
@@ -41,11 +42,18 @@ async def lifespan(app: FastAPI):
         temperature=0.2,
     )
 
+    print("Initializing Cohere reranker...")
+    app.state.reranker = CohereReranker(
+        api_key=settings.cohere_api_key,
+        model=settings.cohere_rerank_model,
+    )
+
     print("Building RAG graph...")
     app.state.rag_graph = build_rag_graph(
         embedder=app.state.embedder,
         client=app.state.qdrant_client,
         llm=app.state.llm,
+        reranker=app.state.reranker,
     )
 
     yield  # Server runs here, handling requests
