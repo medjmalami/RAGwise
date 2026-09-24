@@ -45,6 +45,7 @@ from ragas.metrics import (
 
 from app.config import settings
 from app.graph.rag_graph import build_rag_graph
+from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -249,7 +250,13 @@ def main(args: argparse.Namespace) -> None:
         temperature=0.2,
         num_ctx=OLLAMA_NUM_CTX,
     )
-    graph = build_rag_graph(embedder=embedder, client=qdrant, llm=generator_llm)
+    reranker = CohereReranker(
+        api_key=settings.cohere_api_key,
+        model=settings.cohere_rerank_model,
+    )
+    graph = build_rag_graph(
+        embedder=embedder, client=qdrant, llm=generator_llm, reranker=reranker
+    )
 
     metrics = build_metrics()
 
