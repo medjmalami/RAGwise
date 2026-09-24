@@ -165,6 +165,7 @@ def make_task(graph, top_k: int):
             "answer": result["answer"],
             "contexts": [c["text"] for c in chunks],
             "paper_ids": [c["paper_id"] for c in chunks],
+            "rerank_fallback": result.get("rerank_fallback", False),
         }
 
     return task
@@ -174,6 +175,9 @@ def make_evaluator(metrics: dict[str, Any]):
     async def ragas_evaluator(
         *, input, output, expected_output, metadata=None, **kwargs
     ) -> list[Evaluation]:
+        if output.get("rerank_fallback"):
+            log.warning("Cohere failed for this item, not scoring: %.80s", input)
+            return []
         if not isinstance(expected_output, str) or not expected_output.strip():
             log.warning("skipping item without a reference answer: %.80s", input)
             return []
