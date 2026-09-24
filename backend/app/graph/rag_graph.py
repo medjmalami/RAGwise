@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Optional, TypedDict
 
 from langchain_core.output_parsers import StrOutputParser
@@ -11,11 +12,17 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from qdrant_client import QdrantClient, models
 
+from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import (
     DEFAULT_COLLECTION,
     QueryEmbedder,
     retrieve_top_k,
 )
+
+logger = logging.getLogger(__name__)
+
+# How many hybrid candidates to pull before reranking.
+RERANK_CANDIDATES = 50
 
 NO_DOCS_ANSWER = "I couldn't find any relevant documents to answer your question."
 
@@ -54,10 +61,9 @@ class _RAGInput(TypedDict):
 
 
 class RAGState(_RAGInput, total=False):
-    """Full graph state: required inputs + keys written by the nodes."""
-
-    chunks: list[dict]  # written by `retrieve`
-    answer: str  # written by `generate`
+    candidates: list[dict]  # slim metadata of the 50 hybrid candidates (pre-rerank)
+    chunks: list[dict]  # Cohere top_k, full chunks
+    answer: str
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +94,15 @@ def _format_context(chunks: list[dict]) -> str:
     )
 
 
+def _slim_candidate(c: dict) -> dict:
+    return {
+        "rank": c["hybrid_rank"],
+        "chunk_id": c["chunk_id"],
+        "paper_id": c["paper_id"],
+        "score": c["score"],  # RRF
+    }
+
+
 # ---------------------------------------------------------------------------
 # Graph factory
 # ---------------------------------------------------------------------------
@@ -95,25 +110,46 @@ def build_rag_graph(
     embedder: QueryEmbedder,
     client: QdrantClient,
     llm: ChatOllama,
+    reranker: CohereReranker,
 ) -> CompiledStateGraph:
     chain = PROMPT | llm | StrOutputParser()
 
     async def retrieve(state: RAGState) -> dict:
+        top_k = state["top_k"]
+        candidate_k = max(RERANK_CANDIDATES, top_k)
         try:
-            chunks = await asyncio.to_thread(
+            candidates = await asyncio.to_thread(
                 retrieve_top_k,
                 query=state["query"],
                 client=client,
                 embedder=embedder,
                 collection=DEFAULT_COLLECTION,
-                k=state["top_k"],
+                k=candidate_k,
+                prefetch_limit=candidate_k,
                 query_filter=_build_filter(
                     state.get("paper_id"), state.get("has_picture")
                 ),
             )
         except Exception as e:
             raise RetrievalError(str(e)) from e
-        return {"chunks": chunks}
+        if not candidates:
+            return {"candidates": [], "chunks": []}
+        # Tag each candidate with its hybrid rank before reranking. The
+        # reranker copies the dict, so this survives into the final chunks
+        # and you can see how far Cohere moved each one.
+        for rank, c in enumerate(candidates, 1):
+            c["hybrid_rank"] = rank
+        try:
+            chunks = await reranker.rerank(
+                query=state["query"], chunks=candidates, top_n=top_k
+            )
+        except Exception:
+            logger.exception("Cohere rerank failed; falling back to hybrid order")
+            chunks = candidates[:top_k]
+        return {
+            "candidates": [_slim_candidate(c) for c in candidates],
+            "chunks": chunks,
+        }
 
     async def generate(state: RAGState, config: RunnableConfig) -> dict:
         chunks = state.get("chunks", [])
