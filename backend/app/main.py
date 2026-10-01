@@ -12,6 +12,7 @@ from app.graph.rag_graph import build_rag_graph
 from app.routes.routes import router
 from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder
+from app.telemetry import create_tracer_provider
 
 
 @asynccontextmanager
@@ -64,7 +65,10 @@ async def lifespan(app: FastAPI):
     get_client().shutdown()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    telemetry={"tracer_provider": create_tracer_provider(), "auto_configure": False},
+)
 
 # Register routes
 app.include_router(router)
