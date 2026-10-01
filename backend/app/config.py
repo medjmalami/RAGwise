@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     langfuse_base_url: str
     cohere_api_key: str
     cohere_rerank_model: str = "rerank-v3.5"
+    otel_service_name: str
 
     model_config = SettingsConfigDict(env_file=".env")
 
