@@ -7,12 +7,12 @@ from langchain_ollama import ChatOllama
 from langfuse import Langfuse, get_client
 from qdrant_client import QdrantClient
 
-from app.config import settings
+from app.config.config import settings
+from app.config.telemetry import create_tracer_provider
 from app.graph.rag_graph import build_rag_graph
 from app.routes.routes import router
 from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder
-from app.telemetry import create_tracer_provider
 
 
 @asynccontextmanager

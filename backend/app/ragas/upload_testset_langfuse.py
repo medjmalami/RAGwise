@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from langfuse import Langfuse
 
-from app.config import settings
+from app.config.config import settings
 
 
 def parse_reference_contexts(val):

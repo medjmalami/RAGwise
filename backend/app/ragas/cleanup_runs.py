@@ -8,7 +8,7 @@ so deleting the traces removes the run.
 import httpx
 from langfuse import Langfuse
 
-from app.config import settings
+from app.config.config import settings
 
 BASE = settings.langfuse_base_url.rstrip("/")
 AUTH = (settings.langfuse_public_key, settings.langfuse_secret_key)

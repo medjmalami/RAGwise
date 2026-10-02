@@ -19,7 +19,7 @@ import sys
 import pandas as pd
 from pandas._libs.lib import i8max
 
-from app.config import settings
+from app.config.config import settings
 
 REQUIRED_COLUMNS = ["user_input", "reference_contexts", "reference", "synthesizer_name"]
 

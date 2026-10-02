@@ -43,7 +43,7 @@ from ragas.metrics import (
     ResponseRelevancy,
 )
 
-from app.config import settings
+from app.config.config import settings
 from app.graph.rag_graph import build_rag_graph
 from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder

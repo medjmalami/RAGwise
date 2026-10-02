@@ -12,7 +12,7 @@ from ragas.testset import Testset, TestsetGenerator
 from ragas.testset.graph import KnowledgeGraph, Node, NodeType
 from ragas.testset.transforms import apply_transforms, default_transforms
 
-from app.config import settings
+from app.config.config import settings
 
 # --- CONFIGURATION ---
 os.environ.setdefault("GOOGLE_API_KEY", settings.gemini_api_key)
