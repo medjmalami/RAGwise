@@ -4,7 +4,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-from app.config import settings
+from app.config.config import settings
 
 
 def create_tracer_provider() -> TracerProvider:
