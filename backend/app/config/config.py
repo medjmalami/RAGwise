@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     cohere_api_key: str
     cohere_rerank_model: str = "rerank-v3.5"
     otel_service_name: str
+    jwt_secret: str
+    jwt_algorithm: str = "HS256"
+    access_token_ttl_minutes: int = 15
+    refresh_token_ttl_days: int = 30
+    cookie_secure: bool = True
 
     model_config = SettingsConfigDict(env_file=".env")
 
