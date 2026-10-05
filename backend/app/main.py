@@ -7,6 +7,7 @@ from langchain_ollama import ChatOllama
 from langfuse import Langfuse, get_client
 from qdrant_client import QdrantClient
 
+from app.auth.routes.auth_routes import router as auth_router
 from app.config.config import settings
 from app.config.telemetry import create_tracer_provider
 from app.graph.rag_graph import build_rag_graph
@@ -72,6 +73,7 @@ app = FastAPI(
 
 # Register routes
 app.include_router(router)
+app.include_router(auth_router)
 
 app.add_middleware(
     CORSMiddleware,
