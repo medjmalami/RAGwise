@@ -29,6 +29,9 @@ dependencies = [
     "langfuse>=4.15.4",
     "langgraph>=1.2.11",
     "cohere>=7.1.1",
+    "argon2-cffi>=25.1.0",
+    "pyjwt>=2.15.1",
+    "pydantic[email]>=2.13.4",
 ]
 
 [tool.uv.sources]
