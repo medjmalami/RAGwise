@@ -5,10 +5,12 @@ from fastapi import APIRouter, Depends
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
+from app.auth.dependencies import get_current_user
 from app.controllers.controller import (
     get_rag_graph,
     handle_rag_answer,
 )
+from app.db.models import User
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +48,7 @@ router = APIRouter()
 async def answer(
     request: QueryRequest,
     graph: CompiledStateGraph = Depends(get_rag_graph),
+    user: User = Depends(get_current_user),
 ):
     return await handle_rag_answer(
         query=request.query,
