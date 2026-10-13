@@ -1,4 +1,5 @@
 from typing import List, Optional
+from uuid import UUID  # new import
 
 from fastapi import APIRouter, Depends
 from langgraph.graph.state import CompiledStateGraph
@@ -23,16 +24,13 @@ class SourceItem(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str = Field(..., description="The user's question")
-    top_k: int = Field(
-        5, ge=1, le=20, description="Number of chunks to retrieve for context"
-    )
-    paper_id: Optional[str] = Field(None, description="Filter to a specific paper ID")
-    has_picture: Optional[bool] = Field(
-        None, description="Filter to chunks containing pictures"
+    conversation_id: Optional[UUID] = Field(
+        None, description="Existing conversation to continue; omit to start a new one"
     )
 
 
 class QueryResponse(BaseModel):
+    conversation_id: UUID
     query: str
     answer: str
     sources: List[SourceItem]
@@ -51,8 +49,6 @@ async def answer(
 ):
     return await handle_rag_answer(
         query=request.query,
-        top_k=request.top_k,
-        paper_id=request.paper_id,
-        has_picture=request.has_picture,
+        conversation_id=request.conversation_id,
         graph=graph,
     )
