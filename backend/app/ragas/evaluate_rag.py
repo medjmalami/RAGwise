@@ -12,6 +12,7 @@ dataset item it:
 Usage:
     python -m app.ragas.evaluate_rag --limit 1           # smoke test
     python -m app.ragas.evaluate_rag --run-name v1 --top-k 5
+    python -m app.ragas.evaluate_rag --run-name v1-text-only --no-images   # A/B baseline
 
 Requirements:
     pip install ragas langchain-ollama langchain-huggingface sentence-transformers \
@@ -47,6 +48,7 @@ from app.config.config import settings
 from app.graph.rag_graph import build_rag_graph
 from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder
+from app.services.vision_llm import PathImageChatOllama
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("evaluate_rag")
@@ -146,7 +148,7 @@ def build_metrics() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Experiment task + evaluator
 # ---------------------------------------------------------------------------
-def make_task(graph, top_k: int):
+def make_task(graph, top_k: int, use_images: bool):
     async def task(*, item, **kwargs) -> dict:
         """Run the RAG graph. Output carries the contexts so the evaluator can use them."""
         question = _field(item, "input")
@@ -158,14 +160,27 @@ def make_task(graph, top_k: int):
                 "paper_id": None,
                 "has_picture": None,
             },
-            config={"callbacks": [handler]},
+            config={
+                "callbacks": [handler],
+                # Trace-level tags: filterable in the Langfuse traces table.
+                "metadata": {
+                    "langfuse_tags": [
+                        "eval",
+                        "images:on" if use_images else "images:off",
+                    ]
+                },
+            },
         )
         chunks = result.get("chunks", [])
         return {
             "answer": result["answer"],
+            # Text only: the RAGAS judge is text-only, so contexts stay text.
             "contexts": [c["text"] for c in chunks],
             "paper_ids": [c["paper_id"] for c in chunks],
             "rerank_fallback": result.get("rerank_fallback", False),
+            # Paths only (never bytes) so they show up in the item output.
+            "images_used": result.get("images_used", []),
+            "image_fallback": result.get("image_fallback", False),
         }
 
     return task
@@ -177,6 +192,11 @@ def make_evaluator(metrics: dict[str, Any]):
     ) -> list[Evaluation]:
         if output.get("rerank_fallback"):
             log.warning("Cohere failed for this item, not scoring: %.80s", input)
+            return []
+        if output.get("image_fallback"):
+            # The answer came from the text-only retry, so it doesn't represent
+            # this run's configuration (images on).
+            log.warning("Image call failed for this item, not scoring: %.80s", input)
             return []
         if not isinstance(expected_output, str) or not expected_output.strip():
             log.warning("skipping item without a reference answer: %.80s", input)
@@ -237,8 +257,9 @@ def main(args: argparse.Namespace) -> None:
 
     # --- RAG graph (generator now uses Ollama, not Gemini) -----------------
     log.info(
-        "Loading BGE-M3 + Qdrant + generator (Ollama: %s) ...",
+        "Loading BGE-M3 + Qdrant + generator (Ollama: %s, images=%s) ...",
         OLLAMA_GENERATOR_MODEL,
+        "on" if args.images else "off",
     )
     embedder = QueryEmbedder()
     embedder.load()
@@ -248,7 +269,7 @@ def main(args: argparse.Namespace) -> None:
         prefer_grpc=True,
         grpc_port=6334,
     )
-    generator_llm = ChatOllama(
+    generator_llm = PathImageChatOllama(
         model=OLLAMA_GENERATOR_MODEL,
         base_url=OLLAMA_BASE_URL,
         temperature=0.2,
@@ -259,7 +280,11 @@ def main(args: argparse.Namespace) -> None:
         model=settings.cohere_rerank_model,
     )
     graph = build_rag_graph(
-        embedder=embedder, client=qdrant, llm=generator_llm, reranker=reranker
+        embedder=embedder,
+        client=qdrant,
+        llm=generator_llm,
+        reranker=reranker,
+        use_images=args.images,
     )
 
     metrics = build_metrics()
@@ -277,7 +302,7 @@ def main(args: argparse.Namespace) -> None:
             run_name=args.run_name,
             description="RAGAS: context precision/recall, faithfulness, answer relevancy",
             data=items,
-            task=make_task(graph, args.top_k),
+            task=make_task(graph, args.top_k, args.images),
             evaluators=[make_evaluator(metrics)],
             max_concurrency=args.concurrency,
             metadata={
@@ -285,6 +310,7 @@ def main(args: argparse.Namespace) -> None:
                 "judge_model": OLLAMA_JUDGE_MODEL,
                 "generator_model": OLLAMA_GENERATOR_MODEL,
                 "embed_model": EMBED_MODEL,
+                "use_images": str(args.images),
             },
         )
 
@@ -334,6 +360,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Items processed in parallel. Keep low for a single local GPU.",
+    )
+    p.add_argument(
+        "--no-images",
+        dest="images",
+        action="store_false",
+        help="Text-only generation (baseline for A/B against image-augmented runs)",
     )
     return p.parse_args()
 
