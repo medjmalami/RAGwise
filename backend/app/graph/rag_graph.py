@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional, TypedDict
+from pathlib import Path
+from typing import Optional, TypedDict, cast
 
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langchain_ollama import ChatOllama
+from langfuse import propagate_attributes
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from qdrant_client import QdrantClient, models
@@ -18,18 +21,25 @@ from app.services.retrieve_from_qdrant import (
     QueryEmbedder,
     retrieve_top_k,
 )
+from app.services.vision_llm import PathImageChatOllama, image_path_block
 
 logger = logging.getLogger(__name__)
 
 # How many hybrid candidates to pull before reranking.
 RERANK_CANDIDATES = 50
 
+# Image limits for the generate step (tune after looking at latency/quality).
+MAX_IMAGES_PER_CHUNK = 3
+MAX_IMAGES_TOTAL = 6
+
 NO_DOCS_ANSWER = "I couldn't find any relevant documents to answer your question."
 
+# `{image_note}` is "" when no image is attached, so the text-only prompt stays
+# byte-identical to the old one (keeps your baseline comparable).
 PROMPT = ChatPromptTemplate.from_template(
     """You are an expert AI assistant. Use the following pieces of retrieved context
 to answer the user's question. If you don't know the answer based on the context,
-just say you don't know. Don't try to make up an answer.
+just say you don't know. Don't try to make up an answer.{image_note}
 
 Context:
 {context}
@@ -37,6 +47,11 @@ Context:
 Question: {question}
 
 Answer:"""
+)
+
+IMAGE_NOTE = (
+    "\nSome context chunks come with attached images, referenced as 'Image N'. "
+    "Use them together with the chunk text when they are relevant to the question."
 )
 
 
@@ -62,9 +77,12 @@ class _RAGInput(TypedDict):
 
 class RAGState(_RAGInput, total=False):
     candidates: list[dict]  # slim metadata of the 50 hybrid candidates (pre-rerank)
-    chunks: list[dict]  # Cohere top_k, full chunks
+    chunks: list[dict]  # Cohere top_k, full chunks (text untouched by the image step)
     answer: str
     rerank_fallback: bool
+    images_used: list[dict]  # [{n, chunk_id, paper_id, path}] -- paths only, no bytes
+    images_skipped: list[dict]  # [{chunk_id, path, reason}]
+    image_fallback: bool  # True if the LLM call with images failed -> text-only retry
 
 
 # ---------------------------------------------------------------------------
@@ -89,10 +107,21 @@ def _build_filter(
     return models.Filter(must=must) if must else None
 
 
-def _format_context(chunks: list[dict]) -> str:
-    return "\n\n---\n\n".join(
-        f"Paper: {c['paper_id']}\nContent: {c['text']}" for c in chunks
-    )
+def _format_context(
+    chunks: list[dict], images_by_chunk: Optional[dict[str, list[int]]] = None
+) -> str:
+    parts = []
+    for c in chunks:
+        part = f"Paper: {c['paper_id']}\nContent: {c['text']}"
+        nums = (images_by_chunk or {}).get(c.get("chunk_id") or "")
+        if nums:
+            # Ollama attaches images to the message, not at a position in the
+            # text, so this label is what ties each image to its chunk.
+            part += "\nAttached for this chunk: " + ", ".join(
+                f"Image {n}" for n in nums
+            )
+        parts.append(part)
+    return "\n\n---\n\n".join(parts)
 
 
 def _slim_candidate(c: dict) -> dict:
@@ -104,6 +133,110 @@ def _slim_candidate(c: dict) -> dict:
     }
 
 
+def _collect_images(chunks: list[dict], root: Path) -> tuple[list[dict], list[dict]]:
+    """Pick the images to send, in chunk order. Returns (used, skipped)."""
+    used: list[dict] = []
+    skipped: list[dict] = []
+    for c in chunks:
+        payload = c.get("payload") or {}
+        if not payload.get("has_picture"):
+            continue
+        paths = payload.get("image_paths") or []
+        if not paths:
+            skipped.append(
+                {
+                    "chunk_id": c.get("chunk_id"),
+                    "path": None,
+                    "reason": "has_picture but no image_paths in payload",
+                }
+            )
+            continue
+        for i, rel in enumerate(paths):
+            meta = {"chunk_id": c.get("chunk_id"), "path": rel}
+            if i >= MAX_IMAGES_PER_CHUNK or len(used) >= MAX_IMAGES_TOTAL:
+                skipped.append({**meta, "reason": "cap"})
+            elif not (root / rel).is_file():
+                skipped.append({**meta, "reason": "missing_file"})
+            else:
+                used.append(
+                    {
+                        "n": len(used) + 1,
+                        "chunk_id": c.get("chunk_id"),
+                        "paper_id": c.get("paper_id"),
+                        "path": rel,
+                    }
+                )
+    return used, skipped
+
+
+def _trace_config(
+    config: RunnableConfig,
+    used: list[dict],
+    skipped: list[dict],
+    fallback: bool = False,
+) -> RunnableConfig:
+    tags = ["with_images" if used else "text_only"]
+
+    if skipped:
+        tags.append("images_skipped")
+    if fallback:
+        tags.append("image_fallback")
+
+    existing_metadata = config.get("metadata") or {}
+    existing_tags = existing_metadata.get("langfuse_tags") or []
+
+    meta = {
+        "images_used": bool(used),
+        "num_images": len(used),
+        "image_status": "used" if used else "text_only",
+        "image_paths": [u["path"] for u in used],
+        "image_chunk_ids": [u["chunk_id"] for u in used],
+        "image_paper_ids": sorted({u["paper_id"] for u in used}),
+        "images_skipped": skipped,
+        "langfuse_tags": [*existing_tags, *tags],
+    }
+
+    return cast(
+        RunnableConfig,
+        {
+            **config,
+            "tags": [*(config.get("tags") or []), *tags],
+            "metadata": {**existing_metadata, **meta},
+        },
+    )
+
+
+def _build_messages(
+    chunks: list[dict], query: str, used: list[dict]
+) -> list[BaseMessage]:
+    images_by_chunk: dict[str, list[int]] = {}
+    for u in used:
+        images_by_chunk.setdefault(u["chunk_id"] or "", []).append(u["n"])
+    msg = PROMPT.format_messages(
+        context=_format_context(chunks, images_by_chunk),
+        question=query,
+        image_note=IMAGE_NOTE if used else "",
+    )[0]
+    if not used:
+        return [msg]  # plain string content, same as before
+    return [
+        HumanMessage(
+            content=[
+                {"type": "text", "text": msg.content},
+                *[
+                    image_path_block(
+                        u["path"],
+                        n=u["n"],
+                        chunk_id=u["chunk_id"],
+                        paper_id=u["paper_id"],
+                    )
+                    for u in used
+                ],
+            ]
+        )
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Graph factory
 # ---------------------------------------------------------------------------
@@ -112,8 +245,15 @@ def build_rag_graph(
     client: QdrantClient,
     llm: ChatOllama,
     reranker: CohereReranker,
+    use_images: bool = True,
 ) -> CompiledStateGraph:
-    chain = PROMPT | llm | StrOutputParser()
+    if use_images and not isinstance(llm, PathImageChatOllama):
+        raise TypeError(
+            "use_images=True needs a PathImageChatOllama (app.services.vision_llm); "
+            "pass use_images=False to keep the text-only behavior."
+        )
+    images_root = llm.images_root if isinstance(llm, PathImageChatOllama) else None
+    chain = llm | StrOutputParser()
 
     async def retrieve(state: RAGState) -> dict:
         top_k = state["top_k"]
@@ -159,16 +299,76 @@ def build_rag_graph(
     async def generate(state: RAGState, config: RunnableConfig) -> dict:
         chunks = state.get("chunks", [])
         if not chunks:
-            # Keeps the graph strictly linear: no LLM call when nothing was found.
-            return {"answer": NO_DOCS_ANSWER}
+            return {
+                "answer": NO_DOCS_ANSWER,
+                "images_used": [],
+                "images_skipped": [],
+                "image_fallback": False,
+            }
+
+        used: list[dict] = []
+        skipped: list[dict] = []
+
+        if use_images and images_root is not None:
+            used, skipped = _collect_images(chunks, images_root)
+
+        for s in skipped:
+            logger.warning("image skipped: %s", s)
+
+        image_fallback = False
+
         try:
-            answer = await chain.ainvoke(
-                {"context": _format_context(chunks), "question": state["query"]},
-                config=config,
-            )
+            with propagate_attributes(
+                tags=["with_images" if used else "text_only"],
+                metadata={
+                    "images_used": str(bool(used)).lower(),
+                    "num_images": str(len(used)),
+                    "image_status": "used" if used else "text_only",
+                    "image_paths": ", ".join(u["path"] for u in used),
+                    "image_chunk_ids": ", ".join(str(u["chunk_id"]) for u in used),
+                    "image_paper_ids": ", ".join(
+                        sorted({str(u["paper_id"]) for u in used})
+                    ),
+                    "images_skipped": str(len(skipped)),
+                },
+            ):
+                answer = await chain.ainvoke(
+                    _build_messages(chunks, state["query"], used),
+                    config=_trace_config(config, used, skipped),
+                )
+
         except Exception as e:
-            raise GenerationError(str(e)) from e
-        return {"answer": answer}
+            if not used:
+                raise GenerationError(str(e)) from e
+
+            logger.exception("LLM call with images failed; retrying text-only")
+            image_fallback = True
+            used = []
+
+            try:
+                with propagate_attributes(
+                    tags=["text_only", "image_fallback"],
+                    metadata={
+                        "images_used": "false",
+                        "num_images": "0",
+                        "image_status": "fallback_after_image_error",
+                        "image_fallback": "true",
+                        "images_skipped": str(len(skipped)),
+                    },
+                ):
+                    answer = await chain.ainvoke(
+                        _build_messages(chunks, state["query"], used),
+                        config=_trace_config(config, used, skipped, fallback=True),
+                    )
+            except Exception as e2:
+                raise GenerationError(str(e2)) from e2
+
+        return {
+            "answer": answer,
+            "images_used": used,
+            "images_skipped": skipped,
+            "image_fallback": image_fallback,
+        }
 
     builder = StateGraph(RAGState)
     builder.add_node("retrieve", retrieve)
