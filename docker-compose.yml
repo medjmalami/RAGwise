@@ -2,7 +2,6 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: ragwise-postgres
-    restart: unless-stopped
 
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -27,7 +26,6 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.12.4
     container_name: qdrant
-    restart: unless-stopped
     ports:
       - "6333:6333"
       - "6334:6334"
