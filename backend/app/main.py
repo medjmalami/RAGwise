@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_ollama import ChatOllama
 from langfuse import Langfuse, get_client
 from qdrant_client import QdrantClient
 
@@ -37,12 +38,21 @@ async def lifespan(app: FastAPI):
         grpc_port=6334,
     )
 
-    print("Initializing Gemini LLM...")
+    print("Initializing Ollama LLM...")
 
     app.state.llm = PathImageChatOllama(
         model="gemma4:31b-cloud",
         temperature=0.2,
         num_ctx=16384,  # eval sets this, main.py doesn't
+    )
+
+    print("Initializing title LLM...")
+    app.state.title_llm = ChatOllama(
+        model="gemma4:31b-cloud",
+        temperature=0.3,
+        num_ctx=2048,
+        num_predict=64,
+        reasoning=False,
     )
 
     print("Initializing Cohere reranker...")

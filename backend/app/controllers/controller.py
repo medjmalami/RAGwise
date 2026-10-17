@@ -1,8 +1,10 @@
+import asyncio
 import logging
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
+from langchain_core.language_models import BaseChatModel
 from langfuse import propagate_attributes
 from langfuse.langchain import CallbackHandler
 from langgraph.graph.state import CompiledStateGraph
@@ -13,16 +15,12 @@ from app.db.models import MessageRole
 from app.graph.rag_graph import GenerationError, RetrievalError
 from app.services.conversation_service import (
     add_message,
-    build_title,
     create_conversation,
     slim_sources,
 )
+from app.services.title_service import generate_title
 
 logger = logging.getLogger(__name__)
-
-
-def get_rag_graph(request: Request) -> CompiledStateGraph:
-    return request.app.state.rag_graph
 
 
 DEFAULT_TOP_K = 5
@@ -32,6 +30,7 @@ async def handle_rag_answer(
     query: str,
     conversation_id: Optional[UUID],
     graph: CompiledStateGraph,
+    title_llm: BaseChatModel,
     user_id: int,
     db: AsyncSession,
 ):
@@ -56,6 +55,7 @@ async def handle_rag_answer(
     await db.commit()
 
     handler = CallbackHandler()
+    title_task = asyncio.create_task(generate_title(title_llm, query))
     try:
         with propagate_attributes(
             trace_name="rag-answer",
@@ -74,10 +74,16 @@ async def handle_rag_answer(
                 config={"callbacks": [handler]},
             )
     except RetrievalError as e:
+        title_task.cancel()
         raise HTTPException(status_code=500, detail=f"Retrieval failed: {e}")
     except GenerationError as e:
+        title_task.cancel()
         raise HTTPException(status_code=500, detail=f"LLM generation failed: {e}")
+    except BaseException:
+        title_task.cancel()
+        raise
 
+    title = await title_task
     answer = result["answer"]
     chunks = result.get("chunks", [])
 
@@ -95,7 +101,7 @@ async def handle_rag_answer(
             db,
             conversation_id=conversation_id,
             user_id=user_id,
-            title=build_title(query),
+            title=title,
         )
         await add_message(
             db,
