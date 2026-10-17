@@ -47,6 +47,7 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     conversation_id: UUID
+    title: str
     query: str
     answer: str
     sources: List[SourceItem]

@@ -125,6 +125,7 @@ async def handle_rag_answer(
 
     return {
         "conversation_id": conversation_id,
+        "title": title,
         "query": query,
         "answer": answer,
         "sources": chunks,
