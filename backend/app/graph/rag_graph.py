@@ -5,7 +5,12 @@ import logging
 from pathlib import Path
 from typing import Optional, TypedDict, cast
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
@@ -36,12 +41,14 @@ NO_DOCS_ANSWER = "I couldn't find any relevant documents to answer your question
 
 # `{image_note}` is "" when no image is attached, so the text-only prompt stays
 # byte-identical to the old one (keeps your baseline comparable).
-PROMPT = ChatPromptTemplate.from_template(
-    """You are an expert AI assistant. Use the following pieces of retrieved context
-to answer the user's question. If you don't know the answer based on the context,
-just say you don't know. Don't try to make up an answer.{image_note}
+SYSTEM_PROMPT = """You are an expert AI assistant. Use the retrieved context provided \
+with the latest question to answer it. If you don't know the answer based on the \
+context, just say you don't know. Don't try to make up an answer."""
 
-Context:
+# Per-turn: context and question. `{image_note}` is "" when no image is
+# attached, otherwise IMAGE_NOTE (which ends with a blank line).
+HUMAN_PROMPT = ChatPromptTemplate.from_template(
+    """{image_note}Context:
 {context}
 
 Question: {question}
@@ -50,8 +57,9 @@ Answer:"""
 )
 
 IMAGE_NOTE = (
-    "\nSome context chunks come with attached images, referenced as 'Image N'. "
+    "Some context chunks come with attached images, referenced as 'Image N'. "
     "Use them together with the chunk text when they are relevant to the question."
+    "\n\n"
 )
 
 
@@ -73,6 +81,7 @@ class _RAGInput(TypedDict):
     top_k: int
     paper_id: Optional[str]
     has_picture: Optional[bool]
+    history: list[dict]  # [{"role": "user"|"assistant", "content": str}], oldest first
 
 
 class RAGState(_RAGInput, total=False):
@@ -206,21 +215,34 @@ def _trace_config(
     )
 
 
+def _history_messages(history: list[dict]) -> list[BaseMessage]:
+    messages: list[BaseMessage] = []
+    for m in history:
+        if m.get("role") == "user":
+            messages.append(HumanMessage(content=m["content"]))
+        elif m.get("role") == "assistant":
+            messages.append(AIMessage(content=m["content"]))
+    return messages
+
+
 def _build_messages(
-    chunks: list[dict], query: str, used: list[dict]
+    chunks: list[dict],
+    query: str,
+    used: list[dict],
+    history: Optional[list[dict]] = None,
 ) -> list[BaseMessage]:
     images_by_chunk: dict[str, list[int]] = {}
     for u in used:
         images_by_chunk.setdefault(u["chunk_id"] or "", []).append(u["n"])
-    msg = PROMPT.format_messages(
+    msg = HUMAN_PROMPT.format_messages(
         context=_format_context(chunks, images_by_chunk),
         question=query,
         image_note=IMAGE_NOTE if used else "",
     )[0]
-    if not used:
-        return [msg]  # plain string content, same as before
-    return [
-        HumanMessage(
+
+    final: BaseMessage = msg
+    if used:
+        final = HumanMessage(
             content=[
                 {"type": "text", "text": msg.content},
                 *[
@@ -234,6 +256,11 @@ def _build_messages(
                 ],
             ]
         )
+
+    return [
+        SystemMessage(content=SYSTEM_PROMPT),
+        *_history_messages(history or []),
+        final,
     ]
 
 
@@ -306,6 +333,7 @@ def build_rag_graph(
                 "image_fallback": False,
             }
 
+        history = state.get("history") or []
         used: list[dict] = []
         skipped: list[dict] = []
 
@@ -333,7 +361,7 @@ def build_rag_graph(
                 },
             ):
                 answer = await chain.ainvoke(
-                    _build_messages(chunks, state["query"], used),
+                    _build_messages(chunks, state["query"], used, history),
                     config=_trace_config(config, used, skipped),
                 )
 
@@ -357,7 +385,7 @@ def build_rag_graph(
                     },
                 ):
                     answer = await chain.ainvoke(
-                        _build_messages(chunks, state["query"], used),
+                        _build_messages(chunks, state["query"], used, history),
                         config=_trace_config(config, used, skipped, fallback=True),
                     )
             except Exception as e2:
