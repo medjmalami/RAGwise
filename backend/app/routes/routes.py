@@ -39,8 +39,8 @@ class QueryRequest(BaseModel):
     conversation_id: Optional[UUID] = Field(
         None,
         description=(
-            "Existing conversation to continue (not supported yet); "
-            "omit to start a new one"
+            "Existing conversation to continue; omit to start a new one. "
+            "Returns 404 if it doesn't exist or isn't yours."
         ),
     )
 
