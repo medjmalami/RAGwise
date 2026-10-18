@@ -159,6 +159,7 @@ def make_task(graph, top_k: int, use_images: bool):
                 "top_k": top_k,
                 "paper_id": None,
                 "has_picture": None,
+                "history": [],
             },
             config={
                 "callbacks": [handler],
