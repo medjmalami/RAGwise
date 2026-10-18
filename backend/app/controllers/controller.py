@@ -16,7 +16,10 @@ from app.graph.rag_graph import GenerationError, RetrievalError
 from app.services.conversation_service import (
     add_message,
     create_conversation,
+    get_history,
+    get_owned_conversation,
     slim_sources,
+    touch_conversation,
 )
 from app.services.title_service import generate_title
 
@@ -37,32 +40,51 @@ async def handle_rag_answer(
     if not query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-    # Sprint 1 covers new conversations only. Sprint 2 replaces this with
-    # ownership check + history loading.
-    if conversation_id is not None:
-        raise HTTPException(
-            status_code=501,
-            detail="Continuing an existing conversation is not supported yet",
-        )
+    is_new = conversation_id is None
+    history: list[dict] = []
+    existing_title: Optional[str] = None
 
-    # Generated up front so Langfuse's session_id and the DB primary key are
-    # the same value.
-    conversation_id = uuid4()
+    if is_new:
+        # Generated up front so Langfuse's session_id and the DB primary key
+        # are the same value.
+        conversation_id = uuid4()
+    else:
+        conversation = await get_owned_conversation(
+            db, conversation_id=conversation_id, user_id=user_id
+        )
+        if conversation is None:
+            # Same response for "doesn't exist" and "not yours".
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        existing_title = conversation.title
+        # Loaded before the new user message is persisted, so the history
+        # never contains the current query.
+        history = await get_history(db, conversation_id)
 
     # get_current_user already opened a (read-only) transaction on this
     # session, which holds a pool connection. End it before the slow graph
-    # call. expire_on_commit=False keeps loaded objects usable.
+    # call. Everything read above is already plain Python (str / list[dict]).
     await db.commit()
 
     handler = CallbackHandler()
-    title_task = asyncio.create_task(generate_title(title_llm, query))
+    # Only new conversations need a title; continuations keep theirs.
+    title_task = (
+        asyncio.create_task(generate_title(title_llm, query)) if is_new else None
+    )
+
+    def _cancel_title() -> None:
+        if title_task is not None:
+            title_task.cancel()
+
     try:
         with propagate_attributes(
             trace_name="rag-answer",
             user_id=str(user_id),
             session_id=str(conversation_id),
             tags=["rag"],
-            metadata={"top_k": str(DEFAULT_TOP_K)},
+            metadata={
+                "top_k": str(DEFAULT_TOP_K),
+                "history_len": str(len(history)),
+            },
         ):
             result = await graph.ainvoke(
                 {
@@ -70,20 +92,27 @@ async def handle_rag_answer(
                     "top_k": DEFAULT_TOP_K,
                     "paper_id": None,
                     "has_picture": None,
+                    "history": history,
                 },
                 config={"callbacks": [handler]},
             )
     except RetrievalError as e:
-        title_task.cancel()
+        _cancel_title()
         raise HTTPException(status_code=500, detail=f"Retrieval failed: {e}")
     except GenerationError as e:
-        title_task.cancel()
+        _cancel_title()
         raise HTTPException(status_code=500, detail=f"LLM generation failed: {e}")
     except BaseException:
-        title_task.cancel()
+        _cancel_title()
         raise
 
-    title = await title_task
+    if title_task is not None:
+        title = await title_task
+    else:
+        # Column is nullable; every conversation created through this endpoint
+        # has a title, so this is only a guard for QueryResponse.title: str.
+        title = existing_title or ""
+
     answer = result["answer"]
     chunks = result.get("chunks", [])
 
@@ -95,14 +124,15 @@ async def handle_rag_answer(
             "No Langfuse trace id available for conversation %s", conversation_id
         )
 
-    # One transaction per turn: conversation + user message + assistant message.
+    # One transaction per turn: [conversation +] user message + assistant message.
     try:
-        await create_conversation(
-            db,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            title=title,
-        )
+        if is_new:
+            await create_conversation(
+                db,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                title=title,
+            )
         await add_message(
             db,
             conversation_id=conversation_id,
@@ -117,6 +147,8 @@ async def handle_rag_answer(
             sources=slim_sources(chunks),
             trace_id=trace_id,
         )
+        if not is_new:
+            await touch_conversation(db, conversation_id)
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
