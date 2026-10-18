@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Conversation, Message, MessageRole
@@ -79,3 +80,49 @@ async def add_message(
     # tiebreaker, which needs strictly increasing ids in insertion order.
     await db.flush()
     return message
+
+
+async def get_owned_conversation(
+    db: AsyncSession,
+    *,
+    conversation_id: uuid.UUID,
+    user_id: int,
+) -> Optional[Conversation]:
+    """Ownership lives in the WHERE clause: a conversation that doesn't exist
+    and one that belongs to someone else both come back as None."""
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_history(db: AsyncSession, conversation_id: uuid.UUID) -> list[dict]:
+    """All user/assistant messages, oldest first, as plain dicts.
+
+    Explicit select instead of `conversation.messages`: lazy loading on an
+    async session raises MissingGreenlet. Same ordering as Message's
+    relationship (created_at, id); uses ix_messages_conversation_created.
+    """
+    result = await db.execute(
+        select(Message.role, Message.content)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.role.in_([MessageRole.user, MessageRole.assistant]),
+        )
+        .order_by(Message.created_at, Message.id)
+    )
+    return [{"role": role.value, "content": content} for role, content in result.all()]
+
+
+async def touch_conversation(db: AsyncSession, conversation_id: uuid.UUID) -> None:
+    """Bump updated_at. Inserting messages doesn't UPDATE the conversation row,
+    so onupdate=func.now() never fires on its own."""
+    await db.execute(
+        update(Conversation)
+        .where(Conversation.id == conversation_id)
+        .values(updated_at=func.now())
+        .execution_options(synchronize_session=False)
+    )
