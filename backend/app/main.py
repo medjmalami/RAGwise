@@ -55,6 +55,15 @@ async def lifespan(app: FastAPI):
         reasoning=False,
     )
 
+    print("Initializing rewrite LLM...")
+    app.state.rewrite_llm = ChatOllama(
+        model="gemma4:31b-cloud",  # swap for a smaller model if you have one
+        temperature=0,
+        num_ctx=4096,
+        num_predict=128,
+        reasoning=False,
+    )
+
     print("Initializing Cohere reranker...")
     app.state.reranker = CohereReranker(
         api_key=settings.cohere_api_key,
@@ -67,6 +76,7 @@ async def lifespan(app: FastAPI):
         client=app.state.qdrant_client,
         llm=app.state.llm,
         reranker=app.state.reranker,
+        rewrite_llm=app.state.rewrite_llm,
     )
 
     yield  # Server runs here, handling requests

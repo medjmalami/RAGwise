@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Optional, TypedDict, cast
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -62,6 +64,36 @@ IMAGE_NOTE = (
     "\n\n"
 )
 
+# Rewrite step: how much history the rewriter sees, and sanity limits.
+REWRITE_MAX_TURNS = 3  # last N user/assistant exchanges
+REWRITE_MAX_CHARS_PER_MSG = 600
+REWRITE_MAX_QUERY_CHARS = 400
+
+REWRITE_SYSTEM_PROMPT = """You rewrite follow-up questions into standalone search queries \
+for a retrieval system over scientific papers (arXiv).
+
+Given the conversation so far and the user's latest message, produce ONE self-contained \
+query that can be understood without the conversation.
+
+Rules:
+- Resolve pronouns and references ("it", "that method", "the second one", "what about X?") \
+using the conversation.
+- Keep technical terms, model/dataset names, paper IDs and numbers exactly as written.
+- If the latest message is already standalone, return it unchanged.
+- Do NOT answer the question. Do NOT add information that is not in the conversation.
+- Reply in the same language as the latest message.
+- Output only the query: no quotes, no preamble, no explanation."""
+
+REWRITE_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", REWRITE_SYSTEM_PROMPT),
+        (
+            "human",
+            "Conversation:\n{history}\n\nLatest message: {question}\n\nStandalone query:",
+        ),
+    ]
+)
+
 
 class RetrievalError(Exception):
     """Raised when the retrieve node fails."""
@@ -85,6 +117,7 @@ class _RAGInput(TypedDict):
 
 
 class RAGState(_RAGInput, total=False):
+    rewritten_query: str  # standalone query used for retrieval + rerank
     candidates: list[dict]  # slim metadata of the 50 hybrid candidates (pre-rerank)
     chunks: list[dict]  # Cohere top_k, full chunks (text untouched by the image step)
     answer: str
@@ -264,6 +297,31 @@ def _build_messages(
     ]
 
 
+def _format_history_for_rewrite(history: list[dict]) -> str:
+    recent = history[-2 * REWRITE_MAX_TURNS :]
+    lines = []
+    for m in recent:
+        role = "User" if m.get("role") == "user" else "Assistant"
+        content = (m.get("content") or "").strip()
+        if len(content) > REWRITE_MAX_CHARS_PER_MSG:
+            content = content[:REWRITE_MAX_CHARS_PER_MSG].rstrip() + "..."
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def _clean_rewrite(raw: str, original: str) -> str:
+    """Normalize model output; fall back to the original query if it looks off."""
+    text = raw.strip()
+    if not text:
+        return original
+    text = text.splitlines()[0].strip()  # models sometimes add explanations below
+    text = re.sub(r"^(standalone query|query)\s*:\s*", "", text, flags=re.I)
+    text = text.strip(" \"'`\u201c\u201d")
+    if not text or len(text) > REWRITE_MAX_QUERY_CHARS:
+        return original
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Graph factory
 # ---------------------------------------------------------------------------
@@ -273,6 +331,7 @@ def build_rag_graph(
     llm: ChatOllama,
     reranker: CohereReranker,
     use_images: bool = True,
+    rewrite_llm: Optional[BaseChatModel] = None,
 ) -> CompiledStateGraph:
     if use_images and not isinstance(llm, PathImageChatOllama):
         raise TypeError(
@@ -281,14 +340,40 @@ def build_rag_graph(
         )
     images_root = llm.images_root if isinstance(llm, PathImageChatOllama) else None
     chain = llm | StrOutputParser()
+    chain = llm | StrOutputParser()
+    rewrite_chain = (
+        REWRITE_PROMPT | (rewrite_llm or llm) | StrOutputParser()
+    ).with_config(run_name="rewrite_query")
+
+    async def rewrite(state: RAGState, config: RunnableConfig) -> dict:
+        query = state["query"]
+        history = state.get("history") or []
+        if not history:
+            return {"rewritten_query": query}
+        try:
+            raw = await rewrite_chain.ainvoke(
+                {
+                    "history": _format_history_for_rewrite(history),
+                    "question": query,
+                },
+                config=config,  # propagates the Langfuse callback
+            )
+        except Exception:
+            logger.exception("Query rewrite failed; using original query")
+            return {"rewritten_query": query}
+
+        rewritten = _clean_rewrite(raw, query)
+        logger.info("query rewrite: %r -> %r", query, rewritten)
+        return {"rewritten_query": rewritten}
 
     async def retrieve(state: RAGState) -> dict:
         top_k = state["top_k"]
+        search_query = state.get("rewritten_query") or state["query"]
         candidate_k = max(RERANK_CANDIDATES, top_k)
         try:
             candidates = await asyncio.to_thread(
                 retrieve_top_k,
-                query=state["query"],
+                query=search_query,
                 client=client,
                 embedder=embedder,
                 collection=DEFAULT_COLLECTION,
@@ -310,7 +395,7 @@ def build_rag_graph(
         rerank_fallback = False
         try:
             chunks = await reranker.rerank(
-                query=state["query"], chunks=candidates, top_n=top_k
+                query=search_query, chunks=candidates, top_n=top_k
             )
         except Exception:
             logger.exception("Cohere rerank failed; falling back to hybrid order")
@@ -399,9 +484,15 @@ def build_rag_graph(
         }
 
     builder = StateGraph(RAGState)
+    builder.add_node("rewrite", rewrite)
     builder.add_node("retrieve", retrieve)
     builder.add_node("generate", generate)
-    builder.add_edge(START, "retrieve")
+    builder.add_conditional_edges(
+        START,
+        lambda s: "rewrite" if s.get("history") else "retrieve",
+        {"rewrite": "rewrite", "retrieve": "retrieve"},
+    )
+    builder.add_edge("rewrite", "retrieve")
     builder.add_edge("retrieve", "generate")
     builder.add_edge("generate", END)
     return builder.compile()
