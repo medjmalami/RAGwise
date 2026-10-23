@@ -99,22 +99,60 @@ async def get_owned_conversation(
     return result.scalar_one_or_none()
 
 
-async def get_history(db: AsyncSession, conversation_id: uuid.UUID) -> list[dict]:
-    """All user/assistant messages, oldest first, as plain dicts.
+def _paper_ids(sources: Optional[list[dict]]) -> list[str]:
+    seen: dict[str, None] = {}
+    for s in sources or []:
+        if s.get("paper_id"):
+            seen[s["paper_id"]] = None
+    return list(seen)
 
-    Explicit select instead of `conversation.messages`: lazy loading on an
-    async session raises MissingGreenlet. Same ordering as Message's
-    relationship (created_at, id); uses ix_messages_conversation_created.
-    """
-    result = await db.execute(
-        select(Message.role, Message.content)
-        .where(
-            Message.conversation_id == conversation_id,
-            Message.role.in_([MessageRole.user, MessageRole.assistant]),
-        )
-        .order_by(Message.created_at, Message.id)
+
+async def get_history(
+    db: AsyncSession, conversation_id: uuid.UUID, *, after_id: Optional[int] = None
+) -> list[dict]:
+    """User/assistant messages, oldest first. `after_id` skips messages already
+    folded into the conversation summary."""
+    stmt = select(Message.id, Message.role, Message.content, Message.sources).where(
+        Message.conversation_id == conversation_id,
+        Message.role.in_([MessageRole.user, MessageRole.assistant]),
     )
-    return [{"role": role.value, "content": content} for role, content in result.all()]
+    if after_id is not None:
+        stmt = stmt.where(Message.id > after_id)
+    result = await db.execute(stmt.order_by(Message.created_at, Message.id))
+    return [
+        {"id": i, "role": r.value, "content": c, "paper_ids": _paper_ids(s)}
+        for i, r, c, s in result.all()
+    ]
+
+
+async def save_summary(
+    db: AsyncSession,
+    conversation_id: uuid.UUID,
+    *,
+    summary: str,
+    upto_message_id: int,
+    expected_upto_id: Optional[int],
+) -> bool:
+    """Compare-and-set on the watermark so concurrent requests can't clobber each
+    other. Returns False if someone else compacted first."""
+    current = (
+        Conversation.summary_upto_message_id.is_(None)
+        if expected_upto_id is None
+        else Conversation.summary_upto_message_id == expected_upto_id
+    )
+    result = await db.execute(
+        update(Conversation)
+        .where(Conversation.id == conversation_id, current)
+        .values(
+            summary=summary,
+            summary_upto_message_id=upto_message_id,
+            # Set explicitly so onupdate=func.now() doesn't bump it; compaction
+            # isn't user activity (touch_conversation does that per turn).
+            updated_at=Conversation.updated_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1  # type: ignore[attr-defined]
 
 
 async def touch_conversation(db: AsyncSession, conversation_id: uuid.UUID) -> None:

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 30
     cookie_secure: bool = True
+    history_trigger_tokens: int = 5000
+    history_target_tokens: int = 2500
+    history_min_keep_turns: int = 3
 
     model_config = SettingsConfigDict(env_file=".env")
 

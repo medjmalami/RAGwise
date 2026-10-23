@@ -21,6 +21,7 @@ from app.services.conversation_service import (
     slim_sources,
     touch_conversation,
 )
+from app.services.summary_service import compact_history
 from app.services.title_service import generate_title
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ async def handle_rag_answer(
     conversation_id: Optional[UUID],
     graph: CompiledStateGraph,
     title_llm: BaseChatModel,
+    summary_llm: BaseChatModel,
     user_id: int,
     db: AsyncSession,
 ):
@@ -43,6 +45,8 @@ async def handle_rag_answer(
     is_new = conversation_id is None
     history: list[dict] = []
     existing_title: Optional[str] = None
+    summary: Optional[str] = None
+    summary_upto_id: Optional[int] = None
 
     if is_new:
         # Generated up front so Langfuse's session_id and the DB primary key
@@ -56,14 +60,38 @@ async def handle_rag_answer(
             # Same response for "doesn't exist" and "not yours".
             raise HTTPException(status_code=404, detail="Conversation not found")
         existing_title = conversation.title
+        summary = conversation.summary
+        summary_upto_id = conversation.summary_upto_message_id
         # Loaded before the new user message is persisted, so the history
-        # never contains the current query.
-        history = await get_history(db, conversation_id)
+        # never contains the current query. Messages up to summary_upto_id are
+        # already folded into `summary`, so only the rest is loaded.
+        history = await get_history(db, conversation_id, after_id=summary_upto_id)
 
     # get_current_user already opened a (read-only) transaction on this
-    # session, which holds a pool connection. End it before the slow graph
-    # call. Everything read above is already plain Python (str / list[dict]).
+    # session, which holds a pool connection. End it before the slow LLM calls
+    # below. Everything read above is already plain Python (str / int / list[dict]).
     await db.commit()
+
+    if not is_new:
+        # Cap the context: if summary + history is over the budget, fold the
+        # oldest turns into the summary (persisted) and keep the recent tail
+        # verbatim. Never raises; on failure it returns the inputs unchanged.
+        # Own trace, same session_id, so it shows up in the same Langfuse session.
+        with propagate_attributes(
+            trace_name="summarize-history",
+            user_id=str(user_id),
+            session_id=str(conversation_id),
+            tags=["summary"],
+        ):
+            summary, history = await compact_history(
+                summary_llm,
+                db,
+                conversation_id=conversation_id,
+                summary=summary,
+                summary_upto_id=summary_upto_id,
+                history=history,
+                config={"callbacks": [CallbackHandler()]},
+            )
 
     handler = CallbackHandler()
     # Only new conversations need a title; continuations keep theirs.
@@ -84,6 +112,7 @@ async def handle_rag_answer(
             metadata={
                 "top_k": str(DEFAULT_TOP_K),
                 "history_len": str(len(history)),
+                "has_summary": str(bool(summary)).lower(),
             },
         ):
             result = await graph.ainvoke(
@@ -93,6 +122,7 @@ async def handle_rag_answer(
                     "paper_id": None,
                     "has_picture": None,
                     "history": history,
+                    "history_summary": summary,
                 },
                 config={"callbacks": [handler]},
             )

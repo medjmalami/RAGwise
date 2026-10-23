@@ -94,6 +94,13 @@ REWRITE_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
+REWRITE_MAX_SUMMARY_CHARS = 1200
+SUMMARY_NOTE = (
+    "\n\nSummary of the earlier part of this conversation (older turns, condensed). "
+    "Use it to resolve references to earlier turns; factual claims about papers "
+    "must still come from the retrieved context.\n{summary}"
+)
+
 
 class RetrievalError(Exception):
     """Raised when the retrieve node fails."""
@@ -125,6 +132,7 @@ class RAGState(_RAGInput, total=False):
     images_used: list[dict]  # [{n, chunk_id, paper_id, path}] -- paths only, no bytes
     images_skipped: list[dict]  # [{chunk_id, path, reason}]
     image_fallback: bool  # True if the LLM call with images failed -> text-only retry
+    history_summary: Optional[str]
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +271,7 @@ def _build_messages(
     query: str,
     used: list[dict],
     history: Optional[list[dict]] = None,
+    summary: Optional[str] = None,
 ) -> list[BaseMessage]:
     images_by_chunk: dict[str, list[int]] = {}
     for u in used:
@@ -291,15 +300,25 @@ def _build_messages(
         )
 
     return [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(
+            content=SYSTEM_PROMPT
+            + (SUMMARY_NOTE.format(summary=summary.strip()) if summary else "")
+        ),
         *_history_messages(history or []),
         final,
     ]
 
 
-def _format_history_for_rewrite(history: list[dict]) -> str:
+def _format_history_for_rewrite(
+    history: list[dict], summary: Optional[str] = None
+) -> str:
     recent = history[-2 * REWRITE_MAX_TURNS :]
     lines = []
+    if summary:
+        s = summary.strip()
+        if len(s) > REWRITE_MAX_SUMMARY_CHARS:
+            s = s[:REWRITE_MAX_SUMMARY_CHARS].rstrip() + "..."
+        lines.append(f"[Summary of earlier messages]\n{s}\n[Most recent messages]")
     for m in recent:
         role = "User" if m.get("role") == "user" else "Assistant"
         content = (m.get("content") or "").strip()
@@ -348,12 +367,13 @@ def build_rag_graph(
     async def rewrite(state: RAGState, config: RunnableConfig) -> dict:
         query = state["query"]
         history = state.get("history") or []
-        if not history:
+        summary = state.get("history_summary")
+        if not history and not summary:
             return {"rewritten_query": query}
         try:
             raw = await rewrite_chain.ainvoke(
                 {
-                    "history": _format_history_for_rewrite(history),
+                    "history": _format_history_for_rewrite(history, summary),
                     "question": query,
                 },
                 config=config,  # propagates the Langfuse callback
@@ -419,6 +439,7 @@ def build_rag_graph(
             }
 
         history = state.get("history") or []
+        summary = state.get("history_summary")
         used: list[dict] = []
         skipped: list[dict] = []
 
@@ -446,7 +467,7 @@ def build_rag_graph(
                 },
             ):
                 answer = await chain.ainvoke(
-                    _build_messages(chunks, state["query"], used, history),
+                    _build_messages(chunks, state["query"], used, history, summary),
                     config=_trace_config(config, used, skipped),
                 )
 
@@ -470,7 +491,7 @@ def build_rag_graph(
                     },
                 ):
                     answer = await chain.ainvoke(
-                        _build_messages(chunks, state["query"], used, history),
+                        _build_messages(chunks, state["query"], used, history, summary),
                         config=_trace_config(config, used, skipped, fallback=True),
                     )
             except Exception as e2:
@@ -489,7 +510,9 @@ def build_rag_graph(
     builder.add_node("generate", generate)
     builder.add_conditional_edges(
         START,
-        lambda s: "rewrite" if s.get("history") else "retrieve",
+        lambda s: (
+            "rewrite" if (s.get("history") or s.get("history_summary")) else "retrieve"
+        ),
         {"rewrite": "rewrite", "retrieve": "retrieve"},
     )
     builder.add_edge("rewrite", "retrieve")

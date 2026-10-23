@@ -23,6 +23,10 @@ def get_title_llm(request: Request) -> BaseChatModel:
     return request.app.state.title_llm
 
 
+def get_summary_llm(request: Request) -> BaseChatModel:
+    return request.app.state.summary_llm
+
+
 # ---------------------------------------------------------------------------
 # Pydantic schemas
 # ---------------------------------------------------------------------------
@@ -68,6 +72,7 @@ async def answer(
     # Same dependency as get_current_user uses, so FastAPI hands both the
     # same session instance within a request.
     db: AsyncSession = Depends(get_session),
+    summary_llm: BaseChatModel = Depends(get_summary_llm),
 ):
     return await handle_rag_answer(
         query=request.query,
@@ -76,4 +81,5 @@ async def answer(
         title_llm=title_llm,
         user_id=user.id,
         db=db,
+        summary_llm=summary_llm,
     )
