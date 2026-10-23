@@ -46,6 +46,15 @@ async def lifespan(app: FastAPI):
         num_ctx=16384,  # eval sets this, main.py doesn't
     )
 
+    print("Initializing summary LLM...")
+    app.state.summary_llm = ChatOllama(
+        model="gemma4:31b-cloud",
+        temperature=0,
+        num_ctx=8192,
+        num_predict=512,
+        reasoning=False,
+    )
+
     print("Initializing title LLM...")
     app.state.title_llm = ChatOllama(
         model="gemma4:31b-cloud",
