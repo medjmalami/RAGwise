@@ -359,7 +359,6 @@ def build_rag_graph(
         )
     images_root = llm.images_root if isinstance(llm, PathImageChatOllama) else None
     chain = llm | StrOutputParser()
-    chain = llm | StrOutputParser()
     rewrite_chain = (
         REWRITE_PROMPT | (rewrite_llm or llm) | StrOutputParser()
     ).with_config(run_name="rewrite_query")
