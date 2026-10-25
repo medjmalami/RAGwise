@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
@@ -23,9 +23,15 @@ async def get_conversations(
 @router.get("/{conversation_id}", response_model=ConversationDetailResponse)
 async def get_conversation(
     conversation_id: UUID,
+    limit: int = Query(default=10, ge=1, le=100),
+    before_id: int | None = Query(default=None, gt=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
     return await conversation_controller.get_conversation(
-        db, conversation_id=conversation_id, user=user
+        db,
+        conversation_id=conversation_id,
+        user=user,
+        limit=limit,
+        before_id=before_id,
     )
