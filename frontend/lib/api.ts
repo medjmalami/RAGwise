@@ -8,6 +8,7 @@ export type ApiConversationMessage = { id: number; role: 'user' | 'assistant'; c
 export type ApiConversationDetail = ApiConversation & { messages: ApiConversationMessage[]; has_more: boolean; next_before_id: number | null }
 
 const TOKEN_KEY = 'ragwise.access-token'
+let refreshInFlight: Promise<string | null> | null = null
 
 export function getToken() {
   return typeof window === 'undefined' ? null : window.localStorage.getItem(TOKEN_KEY)
@@ -18,16 +19,46 @@ function saveAuth(result: AuthResponse) {
   return result.user
 }
 
-async function request<T>(path: string, options: RequestInit = {}, token = getToken()): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+function refreshAccessToken(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${API_URL}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('Unable to refresh session')
+      const result = await response.json() as AuthResponse
+      saveAuth(result)
+      return result.access_token
+    }).catch(() => {
+      window.localStorage.removeItem(TOKEN_KEY)
+      return null
+    }).finally(() => {
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
+}
+
+async function fetchWithAuth(path: string, options: RequestInit = {}, token = getToken()) {
+  const send = (accessToken: string | null) => fetch(`${API_URL}${path}`, {
     ...options,
     credentials: 'include',
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...options.headers,
     },
   })
+
+  const response = await send(token)
+  if (response.status !== 401 || !token || path === '/auth/refresh') return response
+
+  const refreshedToken = await refreshAccessToken()
+  return refreshedToken ? send(refreshedToken) : response
+}
+
+async function request<T>(path: string, options: RequestInit = {}, token = getToken()): Promise<T> {
+  const response = await fetchWithAuth(path, options, token)
   if (!response.ok) {
     let detail = `Request failed (${response.status})`
     try {
@@ -53,8 +84,9 @@ export async function restoreSession(): Promise<ApiUser | null> {
     try { return await request<ApiUser>('/auth/me') } catch { /* Try rotating the refresh cookie. */ }
   }
   try {
-    const result = await request<AuthResponse>('/auth/refresh', { method: 'POST' }, null)
-    return saveAuth(result)
+    const refreshedToken = await refreshAccessToken()
+    if (!refreshedToken) return null
+    return await request<ApiUser>('/auth/me', {}, refreshedToken)
   } catch {
     window.localStorage.removeItem(TOKEN_KEY)
     return null
@@ -76,11 +108,10 @@ export async function getConversation(id: string, beforeId?: number) {
 }
 
 export async function streamAnswer(query: string, conversationId: string | null, onEvent: (event: string, data: any) => void, signal?: AbortSignal) {
-  const response = await fetch(`${API_URL}/answer`, {
+  const response = await fetchWithAuth('/answer', {
     method: 'POST',
-    credentials: 'include',
     signal,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}`, Accept: 'text/event-stream' },
+    headers: { Accept: 'text/event-stream' },
     body: JSON.stringify({ query, ...(conversationId ? { conversation_id: conversationId } : {}) }),
   })
   if (!response.ok) {
