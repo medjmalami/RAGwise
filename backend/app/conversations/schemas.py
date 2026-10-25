@@ -27,3 +27,5 @@ class ConversationMessageResponse(BaseModel):
 
 class ConversationDetailResponse(ConversationResponse):
     messages: list[ConversationMessageResponse]
+    has_more: bool
+    next_before_id: int | None

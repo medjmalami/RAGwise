@@ -110,15 +110,23 @@ async def list_conversations(db: AsyncSession, *, user_id: int) -> list[Conversa
 
 
 async def get_conversation_messages(
-    db: AsyncSession, *, conversation_id: uuid.UUID
-) -> list[Message]:
-    """Load conversation messages in stable chronological order."""
+    db: AsyncSession,
+    *,
+    conversation_id: uuid.UUID,
+    limit: int,
+    before_id: Optional[int] = None,
+) -> tuple[list[Message], bool]:
+    """Load the newest page before an optional message ID, oldest first."""
+    stmt = select(Message).where(Message.conversation_id == conversation_id)
+    if before_id is not None:
+        stmt = stmt.where(Message.id < before_id)
+
     result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at, Message.id)
+        stmt.order_by(Message.id.desc()).limit(limit + 1)
     )
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    has_more = len(rows) > limit
+    return list(reversed(rows[:limit])), has_more
 
 
 def _paper_ids(sources: Optional[list[dict]]) -> list[str]:

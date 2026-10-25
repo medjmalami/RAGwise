@@ -24,7 +24,12 @@ async def get_conversations(
 
 
 async def get_conversation(
-    db: AsyncSession, *, conversation_id: UUID, user: User
+    db: AsyncSession,
+    *,
+    conversation_id: UUID,
+    user: User,
+    limit: int = 10,
+    before_id: int | None = None,
 ) -> ConversationDetailResponse:
     conversation = await get_owned_conversation(
         db, conversation_id=conversation_id, user_id=user.id
@@ -32,11 +37,18 @@ async def get_conversation(
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    messages = await get_conversation_messages(db, conversation_id=conversation_id)
+    messages, has_more = await get_conversation_messages(
+        db,
+        conversation_id=conversation_id,
+        limit=limit,
+        before_id=before_id,
+    )
     return ConversationDetailResponse(
         id=conversation.id,
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
         messages=[ConversationMessageResponse.model_validate(item) for item in messages],
+        has_more=has_more,
+        next_before_id=messages[0].id if has_more and messages else None,
     )
