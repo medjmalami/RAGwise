@@ -4,6 +4,7 @@ export type ApiUser = { id: number; email: string; name: string; created_at: str
 export type AuthResponse = { access_token: string; expires_in: number; user: ApiUser }
 export type ApiSource = { score?: number | null; chunk_id?: string | null; paper_id?: string | null; text?: string | null; payload?: Record<string, unknown> }
 export type ApiConversation = { id: string; title: string | null; created_at: string; updated_at: string }
+export type ApiConversationPage = { conversations: ApiConversation[]; has_more: boolean; next_before_updated_at: string | null; next_before_id: string | null }
 export type ApiConversationMessage = { id: number; role: 'user' | 'assistant'; content: string; sources: ApiSource[] | null; created_at: string }
 export type ApiConversationDetail = ApiConversation & { messages: ApiConversationMessage[]; has_more: boolean; next_before_id: number | null }
 
@@ -97,8 +98,13 @@ export async function signOut() {
   try { await request<void>('/auth/logout', { method: 'POST' }) } finally { window.localStorage.removeItem(TOKEN_KEY) }
 }
 
-export async function getConversations() {
-  return request<ApiConversation[]>('/conversations')
+export async function getConversations(beforeUpdatedAt?: string, beforeId?: string) {
+  const params = new URLSearchParams({ limit: '20' })
+  if (beforeUpdatedAt && beforeId) {
+    params.set('before_updated_at', beforeUpdatedAt)
+    params.set('before_id', beforeId)
+  }
+  return request<ApiConversationPage>(`/conversations?${params}`)
 }
 
 export async function getConversation(id: string, beforeId?: number) {

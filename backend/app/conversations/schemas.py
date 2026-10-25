@@ -15,6 +15,13 @@ class ConversationResponse(BaseModel):
     updated_at: datetime
 
 
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationResponse]
+    has_more: bool
+    next_before_updated_at: datetime | None
+    next_before_id: UUID | None
+
+
 class ConversationMessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
