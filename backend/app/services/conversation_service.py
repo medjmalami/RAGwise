@@ -7,9 +7,10 @@ so a whole turn is saved atomically.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Conversation, Message, MessageRole
@@ -99,14 +100,32 @@ async def get_owned_conversation(
     return result.scalar_one_or_none()
 
 
-async def list_conversations(db: AsyncSession, *, user_id: int) -> list[Conversation]:
-    """List a user's conversations, most recently active first."""
+async def list_conversations(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    limit: int = 20,
+    before_updated_at: Optional[datetime] = None,
+    before_id: Optional[uuid.UUID] = None,
+) -> tuple[list[Conversation], bool]:
+    """List one page, most recently active first, using a stable keyset cursor."""
+    stmt = select(Conversation).where(Conversation.user_id == user_id)
+    if before_updated_at is not None and before_id is not None:
+        stmt = stmt.where(
+            or_(
+                Conversation.updated_at < before_updated_at,
+                and_(
+                    Conversation.updated_at == before_updated_at,
+                    Conversation.id < before_id,
+                ),
+            )
+        )
+
     result = await db.execute(
-        select(Conversation)
-        .where(Conversation.user_id == user_id)
-        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+        stmt.order_by(Conversation.updated_at.desc(), Conversation.id.desc()).limit(limit + 1)
     )
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    return rows[:limit], len(rows) > limit
 
 
 async def get_conversation_messages(

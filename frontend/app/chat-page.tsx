@@ -27,12 +27,13 @@ function Logo({ compact = false }: { compact?: boolean }) {
   return <div className="flex items-center gap-2.5"><div className="logo-mark"><span /><span /><span /></div>{!compact && <span className="text-[15px] font-semibold tracking-[-0.02em]">RAGWise</span>}</div>
 }
 
-function Sidebar({ conversations, activeId, onSelect, onNew, onClose, isDark, onToggleTheme, onToggleCollapse, sidebarCollapsed, user, onSignOut }: { conversations: Conversation[]; activeId: string | null; onSelect: (id: string) => void; onNew: () => void; onClose?: () => void; isDark: boolean; onToggleTheme: () => void; onToggleCollapse?: () => void; sidebarCollapsed?: boolean; user: ApiUser; onSignOut: () => void }) {
+function Sidebar({ conversations, activeId, onSelect, onNew, onClose, isDark, onToggleTheme, onToggleCollapse, sidebarCollapsed, user, onSignOut, hasMoreConversations, isLoadingConversations, onLoadMoreConversations }: { conversations: Conversation[]; activeId: string | null; onSelect: (id: string) => void; onNew: () => void; onClose?: () => void; isDark: boolean; onToggleTheme: () => void; onToggleCollapse?: () => void; sidebarCollapsed?: boolean; user: ApiUser; onSignOut: () => void; hasMoreConversations: boolean; isLoadingConversations: boolean; onLoadMoreConversations: () => void }) {
   return <aside className={`sidebar-panel flex h-full w-[274px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-4 ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
     <div className="mb-8 flex items-center justify-between px-2"><Logo /><div className="flex items-center gap-1"><button onClick={onToggleCollapse} className="icon-button desktop-only-control" aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}><Menu size={18} /></button><button onClick={onClose} className="icon-button mobile-only-control" aria-label="Close navigation"><X size={18} /></button></div></div>
     <button className="new-chat mb-7 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-sm font-medium" onClick={onNew}><span className="new-chat-icon" aria-hidden="true">+</span><span>New chat</span></button>
     <div className="mb-2 flex items-center justify-between px-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground"><span>Recent chats</span><Search size={14} /></div>
     <nav className="flex flex-1 flex-col gap-0.5 overflow-auto">{conversations.length ? conversations.map((conversation) => <button key={conversation.id} onClick={() => { onSelect(conversation.id); onClose?.() }} className={`history-item flex items-center gap-2 rounded-lg px-2.5 py-2.5 text-left text-[13px] ${activeId === conversation.id ? 'active' : ''}`}><MessageSquare size={15} className="shrink-0 text-muted-foreground" /><span className="truncate">{conversation.title}</span></button>) : <p className="px-2.5 py-3 text-xs text-muted-foreground">Your conversations will appear here.</p>}</nav>
+    {hasMoreConversations && <button type="button" onClick={onLoadMoreConversations} disabled={isLoadingConversations} className="mt-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted-foreground hover:bg-muted disabled:opacity-50">{isLoadingConversations ? 'Loading…' : 'Load older conversations'}</button>}
     <div className="sidebar-footer mt-5 border-t border-border pt-3"><button className="sidebar-link" onClick={onSignOut}><LogOut size={16} />Sign out</button><button className="sidebar-link" onClick={onToggleTheme} aria-label={`Switch to ${isDark ? 'light' : 'dark'} theme`}><div className="theme-icon">{isDark ? <Moon size={14} /> : <Sun size={14} />}</div>Theme <span className="theme-name">{isDark ? 'Dark' : 'Light'}</span><ChevronDown size={14} className="ml-auto text-muted-foreground" /></button><div className="mt-4 flex items-center gap-2.5 rounded-lg px-2.5 py-2"><div className="avatar">{user.name.trim().split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</div><div className="min-w-0"><p className="truncate text-xs font-medium">{user.name}</p><p className="truncate text-[11px] text-muted-foreground">{user.email}</p></div><MoreHorizontal size={16} className="ml-auto text-muted-foreground" /></div></div>
   </aside>
 }
@@ -63,6 +64,9 @@ export default function Page() {
   const [user, setUser] = useState<ApiUser | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [hasMoreConversations, setHasMoreConversations] = useState(false)
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
+  const [conversationCursor, setConversationCursor] = useState<{ updatedAt: string; id: string } | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [showSources, setShowSources] = useState(false)
@@ -76,11 +80,11 @@ export default function Page() {
 
   useEffect(() => { restoreSession().then(setUser).finally(() => setAuthLoading(false)) }, [])
   useEffect(() => {
-    if (!user) { setConversations([]); setActiveId(null); return }
+    if (!user) { setConversations([]); setActiveId(null); setHasMoreConversations(false); setConversationCursor(null); return }
     let cancelled = false
-    getConversations().then((items) => {
+    getConversations().then((page) => {
       if (cancelled) return
-      const mapped = items.map((item) => ({
+      const mapped = page.conversations.map((item) => ({
         id: item.id,
         title: item.title || 'Untitled conversation',
         time: item.updated_at,
@@ -90,12 +94,35 @@ export default function Page() {
         nextBeforeId: null,
       }))
       setConversations(mapped)
+      setHasMoreConversations(page.has_more)
+      setConversationCursor(page.next_before_updated_at && page.next_before_id ? { updatedAt: page.next_before_updated_at, id: page.next_before_id } : null)
       setActiveId(mapped[0]?.id ?? null)
     }).catch((cause) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : 'Unable to load conversations')
     })
     return () => { cancelled = true }
   }, [user])
+  async function loadMoreConversations() {
+    if (!hasMoreConversations || !conversationCursor || isLoadingConversations) return
+    setIsLoadingConversations(true)
+    try {
+      const page = await getConversations(conversationCursor.updatedAt, conversationCursor.id)
+      const mapped = page.conversations.map((item) => ({
+        id: item.id,
+        title: item.title || 'Untitled conversation',
+        time: item.updated_at,
+        messages: [],
+        messagesLoaded: false,
+        hasMoreMessages: false,
+        nextBeforeId: null,
+      }))
+      setConversations((items) => [...items, ...mapped.filter((item) => !items.some((existing) => existing.id === item.id))])
+      setHasMoreConversations(page.has_more)
+      setConversationCursor(page.next_before_updated_at && page.next_before_id ? { updatedAt: page.next_before_updated_at, id: page.next_before_id } : null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load more conversations')
+    } finally { setIsLoadingConversations(false) }
+  }
   useEffect(() => {
     if (!activeId || activeId.startsWith('pending-')) return
     const conversation = conversations.find((item) => item.id === activeId)
@@ -148,7 +175,7 @@ export default function Page() {
   const send = useCallback(async (text = input) => {
     const query = text.trim()
     if (!query || isStreaming || isLoadingActive || !user) return
-    setInput(''); setError(''); setIsStreaming(true); setShowSources(true)
+    setInput(''); setError(''); setIsStreaming(true)
     const previous = conversations.find((conversation) => conversation.id === activeId)
     const temporaryId = previous?.id || `pending-${Date.now()}`
     const userMessage: Message = { role: 'user', content: query }
@@ -206,7 +233,7 @@ export default function Page() {
   if (!user) return <div className={isDark ? 'dark' : ''}><AuthScreen onAuthenticated={setUser} /></div>
 
 
-  return <div className={isDark ? 'dark app-shell' : 'app-shell'}><div className="app-frame"><div className={`mobile-overlay ${showSidebar || showSources ? 'visible' : ''}`} onClick={() => { setShowSidebar(false); setShowSources(false) }} /><div className={`sidebar-drawer ${showSidebar ? 'open' : ''}`}><Sidebar conversations={conversations} activeId={activeId} onSelect={(id) => { if (!isStreaming) setActiveId(id) }} onNew={newChat} onClose={() => setShowSidebar(false)} isDark={isDark} onToggleTheme={() => setIsDark((dark) => !dark)} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} sidebarCollapsed={sidebarCollapsed} user={user} onSignOut={logout} /></div><div className={`desktop-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}><Sidebar conversations={conversations} activeId={activeId} onSelect={(id) => { if (!isStreaming) setActiveId(id) }} onNew={newChat} isDark={isDark} onToggleTheme={() => setIsDark((dark) => !dark)} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} sidebarCollapsed={sidebarCollapsed} user={user} onSignOut={logout} /></div><main className="chat-area flex min-w-0 flex-1 flex-col"><header className="chat-header flex items-center justify-between border-b border-border px-4 py-3 md:px-7"><button className="icon-button mobile-only-control" onClick={() => setShowSidebar(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="ml-auto flex items-center gap-1.5"><button className={`sources-toggle flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium ${showSources ? 'selected' : ''}`} onClick={() => setShowSources(!showSources)}><PanelRight size={16} /> <span className="hidden sm:inline">Sources</span></button></div></header><div ref={chatScrollRef} className="chat-scroll flex-1 overflow-auto"><div className={`chat-content mx-auto w-full ${active ? 'has-messages' : ''}`}>{!active ? <Welcome onPrompt={(prompt) => send(prompt)} /> : isLoadingActive ? <p className="text-center text-sm text-muted-foreground">Loading conversation…</p> : <div className="message-list">{active.hasMoreMessages && <button type="button" className="mx-auto mb-4 block rounded-lg border border-border px-4 py-2 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={loadOlderMessages} disabled={isLoadingOlder}>{isLoadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}{active.messages.map((message, index) => <div key={index} className={`message-row ${message.role}`}>{message.role === 'assistant' && <div className="assistant-mark"><Sparkles size={15} /></div>}<div className={message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}>{message.role === 'assistant' ? <>{message.content ? <MarkdownText content={message.content} /> : message.loading ? <p className="streaming-indicator">Searching papers and drafting an answer…</p> : null}{message.loading && message.content && <span className="streaming-cursor" />}{!message.loading && message.content && <div className="response-footer"><span><Check size={13} /> Answer grounded in {message.sources?.length ?? 0} sources</span><button aria-label="More answer options"><MoreHorizontal size={15} /></button></div>}</> : <p>{message.content}</p>}</div></div>)}</div>}</div>{error && <div className="chat-error" role="alert">{error}</div>}</div><div className="composer-wrap mx-auto w-full"><div className="composer"><textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); send() } }} placeholder="Ask a question about RAG research..." rows={1} aria-label="Ask a research question" /><div className="composer-bottom"><div className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="composer-tool"><Sparkles size={14} /> Research mode</span><span className="hidden sm:inline text-muted-foreground/40">•</span><span className="hidden sm:inline">RAGWise collection</span></div><button onClick={() => send()} className="send-button" disabled={!input.trim() || isStreaming || isLoadingActive} aria-label="Send message"><ArrowUp size={17} /></button></div></div><p className="disclaimer">RAGWise can make mistakes. Verify important findings with the original papers.</p></div></main><div className={`sources-drawer ${showSources ? 'open' : ''}`}><SourcesPanel activeSources={activeSources} onClose={() => setShowSources(false)} /></div></div></div>
+  return <div className={isDark ? 'dark app-shell' : 'app-shell'}><div className="app-frame"><div className={`mobile-overlay ${showSidebar || showSources ? 'visible' : ''}`} onClick={() => { setShowSidebar(false); setShowSources(false) }} /><div className={`sidebar-drawer ${showSidebar ? 'open' : ''}`}><Sidebar conversations={conversations} activeId={activeId} onSelect={(id) => { if (!isStreaming) setActiveId(id) }} onNew={newChat} onClose={() => setShowSidebar(false)} isDark={isDark} onToggleTheme={() => setIsDark((dark) => !dark)} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} sidebarCollapsed={sidebarCollapsed} user={user} onSignOut={logout} hasMoreConversations={hasMoreConversations} isLoadingConversations={isLoadingConversations} onLoadMoreConversations={loadMoreConversations} /></div><div className={`desktop-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}><Sidebar conversations={conversations} activeId={activeId} onSelect={(id) => { if (!isStreaming) setActiveId(id) }} onNew={newChat} isDark={isDark} onToggleTheme={() => setIsDark((dark) => !dark)} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} sidebarCollapsed={sidebarCollapsed} user={user} onSignOut={logout} hasMoreConversations={hasMoreConversations} isLoadingConversations={isLoadingConversations} onLoadMoreConversations={loadMoreConversations} /></div><main className="chat-area flex min-w-0 flex-1 flex-col"><header className="chat-header flex items-center justify-between border-b border-border px-4 py-3 md:px-7"><button className="icon-button mobile-only-control" onClick={() => setShowSidebar(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="ml-auto flex items-center gap-1.5"><button className={`sources-toggle flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium ${showSources ? 'selected' : ''}`} onClick={() => setShowSources(!showSources)}><PanelRight size={16} /> <span className="hidden sm:inline">Sources</span></button></div></header><div ref={chatScrollRef} className="chat-scroll flex-1 overflow-auto"><div className={`chat-content mx-auto w-full ${active ? 'has-messages' : ''}`}>{!active ? <Welcome onPrompt={(prompt) => send(prompt)} /> : isLoadingActive ? <p className="text-center text-sm text-muted-foreground">Loading conversation…</p> : <div className="message-list">{active.hasMoreMessages && <button type="button" className="mx-auto mb-4 block rounded-lg border border-border px-4 py-2 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={loadOlderMessages} disabled={isLoadingOlder}>{isLoadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}{active.messages.map((message, index) => <div key={index} className={`message-row ${message.role}`}>{message.role === 'assistant' && <div className="assistant-mark"><Sparkles size={15} /></div>}<div className={message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}>{message.role === 'assistant' ? <>{message.content ? <MarkdownText content={message.content} /> : message.loading ? <p className="streaming-indicator">Searching papers and drafting an answer…</p> : null}{message.loading && message.content && <span className="streaming-cursor" />}{!message.loading && message.content && <div className="response-footer"><span><Check size={13} /> Answer grounded in {message.sources?.length ?? 0} sources</span><button aria-label="More answer options"><MoreHorizontal size={15} /></button></div>}</> : <p>{message.content}</p>}</div></div>)}</div>}</div>{error && <div className="chat-error" role="alert">{error}</div>}</div><div className="composer-wrap mx-auto w-full"><div className="composer"><textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); send() } }} placeholder="Ask a question about RAG research..." rows={1} aria-label="Ask a research question" /><div className="composer-bottom"><div className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="composer-tool"><Sparkles size={14} /> Research mode</span><span className="hidden sm:inline text-muted-foreground/40">•</span><span className="hidden sm:inline">RAGWise collection</span></div><button onClick={() => send()} className="send-button" disabled={!input.trim() || isStreaming || isLoadingActive} aria-label="Send message"><ArrowUp size={17} /></button></div></div><p className="disclaimer">RAGWise can make mistakes. Verify important findings with the original papers.</p></div></main><div className={`sources-drawer ${showSources ? 'open' : ''}`}><SourcesPanel activeSources={activeSources} onClose={() => setShowSources(false)} /></div></div></div>
 }
 
 function Welcome({ onPrompt }: { onPrompt: (text: string) => void }) { const prompts = ['What are the latest approaches to RAG?', 'What are the main RAG evaluation methods?']; return <div className="welcome"><div className="welcome-icon"><Sparkles size={20} /></div><p className="eyebrow">Your research copilot</p><h1>Explore the RAG<br /><span>research landscape.</span></h1><p className="welcome-subtitle">Ask questions, compare methods, and trace every answer back to the papers that support it.</p><div className="prompt-grid">{prompts.map((prompt) => <button key={prompt} onClick={() => onPrompt(prompt)} className="prompt-card"><span>{prompt}</span><ArrowUp size={15} /></button>)}</div></div> }
