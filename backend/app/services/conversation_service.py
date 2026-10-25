@@ -99,6 +99,28 @@ async def get_owned_conversation(
     return result.scalar_one_or_none()
 
 
+async def list_conversations(db: AsyncSession, *, user_id: int) -> list[Conversation]:
+    """List a user's conversations, most recently active first."""
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id == user_id)
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_conversation_messages(
+    db: AsyncSession, *, conversation_id: uuid.UUID
+) -> list[Message]:
+    """Load conversation messages in stable chronological order."""
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at, Message.id)
+    )
+    return list(result.scalars().all())
+
+
 def _paper_ids(sources: Optional[list[dict]]) -> list[str]:
     seen: dict[str, None] = {}
     for s in sources or []:
