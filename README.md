@@ -228,9 +228,9 @@ These results were measured on the 100-question synthetic testset with RAGAS, us
 
 | Variant | Avg latency | Answer relevancy | Context precision | Context recall | Faithfulness |
 |---|---:|---:|---:|---:|---:|
-| Hybrid dense+sparse baseline | 1.6538s | 0.71 | 0.45 | 0.67 | 0.92 |
+| Hybrid dense+sparse baseline | 1.6538s | 0.73 | 0.45 | 0.67 | 0.92 |
 | + Cohere rerank | 3.2212s | 0.71 | 0.60 | 0.72 | 0.96 |
-| + Multimodal figures | 3.8487s | 0.75 | 0.60 | 0.72 | 0.96 |
+| + Multimodal figures | 3.8487s | 0.75 | 0.59 | 0.72 | 0.95 |
 
 Cohere reranking raised context precision by about 33%, context recall by about 7%, and faithfulness by about 4%; answer relevancy moved from 0.73 to 0.71, while latency was roughly 2x the hybrid baseline. The multimodal run used figures for 16 of 100 questions. Compared with reranking, its aggregate answer relevancy was 0.75, precision 0.59, recall 0.72, and faithfulness 0.95, with average latency of 3.8487s; on some image-triggered questions, answer relevancy rose while faithfulness fell.
 
