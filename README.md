@@ -12,7 +12,7 @@ arXiv HTML and images
   → token-aware chunks with paper and image metadata
   → BGE-M3 dense and sparse embeddings in Qdrant
   → conversation-aware query rewrite
-  → hybrid retrieval and optional Cohere reranking
+  → hybrid retrieval and Cohere reranking
   → Ollama answer generation, with relevant figures when available
 ```
 
