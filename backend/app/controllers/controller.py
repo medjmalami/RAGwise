@@ -53,6 +53,7 @@ from app.services.conversation_service import (
     slim_sources,
     touch_conversation,
 )
+from app.services.arxiv_metadata import arxiv_display_metadata
 from app.services.summary_service import compact_history
 from app.services.title_service import generate_title
 
@@ -77,12 +78,16 @@ def sse(event: str, data: Any) -> str:
 
 def _public_source(c: dict) -> dict:
     """Same shape the old QueryResponse.sources (SourceItem) exposed."""
+    payload = dict(c.get("payload") or {})
+    display_metadata = arxiv_display_metadata(c.get("paper_id"))
+    for key, value in display_metadata.items():
+        payload.setdefault(key, value)
     return {
         "score": c.get("score"),
         "chunk_id": c.get("chunk_id"),
         "paper_id": c.get("paper_id"),
         "text": c.get("text"),
-        "payload": c.get("payload") or {},
+        "payload": payload,
     }
 
 

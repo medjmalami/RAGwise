@@ -14,13 +14,21 @@ function sourceFromApi(source: ApiSource, index: number): Source {
   const paperId = String(source.paper_id || payload.paper_id || '')
   return {
     id: index + 1,
-    title: String(payload.title || payload.paper_title || (paperId ? `Paper ${paperId}` : `Retrieved passage ${index + 1}`)),
-    authors: String(payload.authors || payload.author || 'Research paper'),
-    year: String(payload.year || payload.published || ''),
+    title: String(source.title || payload.title || payload.paper_title || (paperId ? `Paper ${paperId}` : `Retrieved passage ${index + 1}`)),
+    authors: String(source.authors?.join(', ') || payload.authors || payload.author || 'Research paper'),
+    year: String(source.year || payload.year || payload.published || ''),
     excerpt: text,
     tag: String(payload.category || (paperId ? 'Research paper' : 'Retrieved passage')),
     paperId,
   }
+}
+
+function cleanPassageText(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\(#bib\.[^)]+\)/g, '$1')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s+\)/g, ')')
 }
 
 function Logo({ compact = false }: { compact?: boolean }) {
@@ -38,11 +46,60 @@ function Sidebar({ conversations, activeId, onSelect, onNew, onClose, isDark, on
   </aside>
 }
 
-function SourcesPanel({ activeSources, onClose }: { activeSources: Source[]; onClose: () => void }) {
-  return <aside className="sources-panel flex h-full w-[312px] shrink-0 flex-col border-l border-border bg-card"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><div className="flex items-center gap-2"><BookOpen size={16} className="text-primary" /><h2 className="text-sm font-semibold">Sources</h2></div><p className="mt-1 text-xs text-muted-foreground">{activeSources.length} retrieved passages</p></div><button onClick={onClose} className="icon-button" aria-label="Close sources"><X size={17} /></button></div><div className="flex-1 overflow-auto px-4 py-4">{activeSources.length ? activeSources.map((source, index) => <article key={`${source.paperId}-${source.id}`} className="source-card group mb-3 rounded-xl border border-border bg-background p-3.5"><div className="mb-3 flex items-start justify-between"><span className="citation-badge">[{index + 1}]</span><span className="rounded-full bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground">{source.tag}</span></div><h3 className="text-[13px] font-semibold leading-5 text-foreground">{source.title}</h3>{source.authors && <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{source.authors}</p>}<div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-[11px] text-muted-foreground"><span>{source.year || source.paperId || 'Retrieved source'}</span>{source.paperId && <a className="font-medium text-primary" href={`https://arxiv.org/abs/${source.paperId}`} target="_blank" rel="noreferrer">View paper ↗</a>}</div>{source.excerpt && <p className="mt-3 border-l-2 border-primary/30 pl-3 text-xs leading-5 text-muted-foreground">{source.excerpt}</p>}</article>) : <p className="px-1 py-3 text-sm text-muted-foreground">Sources will appear when the assistant retrieves evidence.</p>}</div></aside>
+function SourcesPanel({ activeSources, onClose, highlightedSource }: { activeSources: Source[]; onClose: () => void; highlightedSource: number | null }) {
+  return <aside className="sources-panel flex h-full w-[312px] shrink-0 flex-col border-l border-border bg-card"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><div className="flex items-center gap-2"><BookOpen size={16} className="text-primary" /><h2 className="text-sm font-semibold">Sources</h2></div><p className="mt-1 text-xs text-muted-foreground">{activeSources.length} retrieved passages</p></div><button onClick={onClose} className="icon-button" aria-label="Close sources"><X size={17} /></button></div><div className="flex-1 overflow-auto px-4 py-4">{activeSources.length ? activeSources.map((source, index) => <article id={`source-${index + 1}`} key={`${source.paperId}-${source.id}`} className={`source-card group mb-3 rounded-xl border border-border bg-background p-3.5 ${highlightedSource === index + 1 ? 'highlighted' : ''}`}><div className="mb-3 flex items-start justify-between"><span className="citation-badge">[{index + 1}]</span><span className="rounded-full bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground">{source.tag}</span></div><h3 className="text-[13px] font-semibold leading-5 text-foreground">{source.title}</h3>{source.paperId && <p className="mt-1 text-[10px] font-mono text-muted-foreground">arXiv:{source.paperId}</p>}{source.authors && <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{source.authors}</p>}<div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-[11px] text-muted-foreground"><span>{source.year || 'Retrieved source'}</span>{source.paperId && <a className="font-medium text-primary" href={`https://arxiv.org/abs/${source.paperId}`} target="_blank" rel="noreferrer">View paper ↗</a>}</div>{source.excerpt && <p className="mt-3 border-l-2 border-primary/30 pl-3 text-xs leading-5 text-muted-foreground">{cleanPassageText(source.excerpt)}</p>}</article>) : <p className="px-1 py-3 text-sm text-muted-foreground">Sources will appear when the assistant retrieves evidence.</p>}</div></aside>
 }
 
-function MarkdownText({ content }: { content: string }) { return <div className="message-copy">{content.split('\n\n').map((paragraph, index) => <p key={index}>{paragraph.split(/(\[\d+\]|\*\*[^*]+\*\*)/g).map((part, i) => part.match(/^\[\d+\]$/) ? <span key={i} className="citation-link">{part}</span> : part.startsWith('**') ? <strong key={i}>{part.slice(2, -2)}</strong> : part)}</p>)}</div> }
+function renderInline(text: string, onCitation: (index: number) => void, sourceCount: number) {
+  return text.replace(/\$\s*\\(?:rightarrow|to|Rightarrow)\s*\$/g, '→').split(/(\[\d+\]|\*\*[^*]+\*\*)/g).map((part, index) => {
+    const citation = part.match(/^\[(\d+)\]$/)
+    if (citation) {
+      const sourceIndex = Number(citation[1])
+      return sourceIndex > 0 && sourceIndex <= sourceCount
+        ? <button key={index} type="button" className="citation-link" onClick={() => onCitation(sourceIndex)}>{part}</button>
+        : <span key={index} className="citation-link">{part}</span>
+    }
+    return part.startsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong> : part
+  })
+}
+
+function MarkdownText({ content, onCitation, sourceCount }: { content: string; onCitation: (index: number) => void; sourceCount: number }) {
+  const normalized = content
+    .replace(/(^|\n)\s*\*\s+/g, '$1- ')
+    .replace(/([:.;])\s+\*\s+(?=\S)/g, '$1\n- ')
+  const blocks: Array<{ type: 'paragraph'; text: string } | { type: 'list'; items: string[] }> = []
+  let paragraph: string[] = []
+  let items: string[] = []
+  const flushParagraph = () => {
+    if (paragraph.length) blocks.push({ type: 'paragraph', text: paragraph.join(' ') })
+    paragraph = []
+  }
+  const flushItems = () => {
+    if (items.length) blocks.push({ type: 'list', items })
+    items = []
+  }
+
+  for (const line of normalized.split('\n')) {
+    const trimmed = line.trim()
+    const bullet = line.match(/^\s*[-*+]\s+(.+)$/)
+    if (!trimmed) {
+      flushParagraph()
+      flushItems()
+    } else if (bullet) {
+      flushParagraph()
+      items.push(bullet[1])
+    } else {
+      flushItems()
+      paragraph.push(trimmed)
+    }
+  }
+  flushParagraph()
+  flushItems()
+
+  return <div className="message-copy">{blocks.map((block, index) => block.type === 'list'
+    ? <ul key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, onCitation, sourceCount)}</li>)}</ul>
+    : <p key={index}>{renderInline(block.text, onCitation, sourceCount)}</p>)}</div>
+}
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: ApiUser) => void }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
@@ -70,6 +127,7 @@ export default function Page() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [showSources, setShowSources] = useState(false)
+  const [highlightedSource, setHighlightedSource] = useState<number | null>(null)
   const [showSidebar, setShowSidebar] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [isDark, setIsDark] = useState(true)
@@ -165,6 +223,13 @@ export default function Page() {
   const active = conversations.find((conversation) => conversation.id === activeId)
   const isLoadingActive = Boolean(activeId && active && !active.messagesLoaded)
   const activeSources = useMemo(() => [...(active?.messages ?? [])].reverse().find((message) => message.role === 'assistant')?.sources ?? [], [active])
+  const latestAssistantIndex = active?.messages.reduce((last, message, index) => message.role === 'assistant' ? index : last, -1) ?? -1
+  function openSource(sourceIndex: number) {
+    setShowSources(true)
+    setHighlightedSource(sourceIndex)
+    window.requestAnimationFrame(() => document.getElementById(`source-${sourceIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    window.setTimeout(() => setHighlightedSource((current) => current === sourceIndex ? null : current), 1800)
+  }
   useLayoutEffect(() => {
     if (!active?.messagesLoaded) return
     const chatScroll = chatScrollRef.current
@@ -233,7 +298,7 @@ export default function Page() {
   if (!user) return <div className={isDark ? 'dark' : ''}><AuthScreen onAuthenticated={setUser} /></div>
 
 
-  return <div className={isDark ? 'dark app-shell' : 'app-shell'}><div className="app-frame"><div className={`mobile-overlay ${showSidebar || showSources ? 'visible' : ''}`} onClick={() => { setShowSidebar(false); setShowSources(false) }} /><div className={`sidebar-drawer ${showSidebar ? 'open' : ''}`}><Sidebar conversations={conversations} activeId={activeId} onSelect={(id) => { if (!isStreaming) setActiveId(id) }} onNew={newChat} onClose={() => setShowSidebar(false)} isDark={isDark} onToggleTheme={() => setIsDark((dark) => !dark)} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} sidebarCollapsed={sidebarCollapsed} user={user} onSignOut={logout} hasMoreConversations={hasMoreConversations} isLoadingConversations={isLoadingConversations} onLoadMoreConversations={loadMoreConversations} /></div><div className={`desktop-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}><Sidebar conversations={conversations} activeId={activeId} onSelect={(id) => { if (!isStreaming) setActiveId(id) }} onNew={newChat} isDark={isDark} onToggleTheme={() => setIsDark((dark) => !dark)} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} sidebarCollapsed={sidebarCollapsed} user={user} onSignOut={logout} hasMoreConversations={hasMoreConversations} isLoadingConversations={isLoadingConversations} onLoadMoreConversations={loadMoreConversations} /></div><main className="chat-area flex min-w-0 flex-1 flex-col"><header className="chat-header flex items-center justify-between border-b border-border px-4 py-3 md:px-7"><button className="icon-button mobile-only-control" onClick={() => setShowSidebar(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="ml-auto flex items-center gap-1.5"><button className={`sources-toggle flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium ${showSources ? 'selected' : ''}`} onClick={() => setShowSources(!showSources)}><PanelRight size={16} /> <span className="hidden sm:inline">Sources</span></button></div></header><div ref={chatScrollRef} className="chat-scroll flex-1 overflow-auto"><div className={`chat-content mx-auto w-full ${active ? 'has-messages' : ''}`}>{!active ? <Welcome onPrompt={(prompt) => send(prompt)} /> : isLoadingActive ? <p className="text-center text-sm text-muted-foreground">Loading conversation…</p> : <div className="message-list">{active.hasMoreMessages && <button type="button" className="mx-auto mb-4 block rounded-lg border border-border px-4 py-2 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={loadOlderMessages} disabled={isLoadingOlder}>{isLoadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}{active.messages.map((message, index) => <div key={index} className={`message-row ${message.role}`}>{message.role === 'assistant' && <div className="assistant-mark"><Sparkles size={15} /></div>}<div className={message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}>{message.role === 'assistant' ? <>{message.content ? <MarkdownText content={message.content} /> : message.loading ? <p className="streaming-indicator">Searching papers and drafting an answer…</p> : null}{message.loading && message.content && <span className="streaming-cursor" />}{!message.loading && message.content && <div className="response-footer"><span><Check size={13} /> Answer grounded in {message.sources?.length ?? 0} sources</span><button aria-label="More answer options"><MoreHorizontal size={15} /></button></div>}</> : <p>{message.content}</p>}</div></div>)}</div>}</div>{error && <div className="chat-error" role="alert">{error}</div>}</div><div className="composer-wrap mx-auto w-full"><div className="composer"><textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); send() } }} placeholder="Ask a question about RAG research..." rows={1} aria-label="Ask a research question" /><div className="composer-bottom"><div className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="composer-tool"><Sparkles size={14} /> Research mode</span><span className="hidden sm:inline text-muted-foreground/40">•</span><span className="hidden sm:inline">RAGWise collection</span></div><button onClick={() => send()} className="send-button" disabled={!input.trim() || isStreaming || isLoadingActive} aria-label="Send message"><ArrowUp size={17} /></button></div></div><p className="disclaimer">RAGWise can make mistakes. Verify important findings with the original papers.</p></div></main><div className={`sources-drawer ${showSources ? 'open' : ''}`}><SourcesPanel activeSources={activeSources} onClose={() => setShowSources(false)} /></div></div></div>
+  return <div className={isDark ? 'dark app-shell' : 'app-shell'}><div className="app-frame"><div className={`mobile-overlay ${showSidebar || showSources ? 'visible' : ''}`} onClick={() => { setShowSidebar(false); setShowSources(false) }} /><div className={`sidebar-drawer ${showSidebar ? 'open' : ''}`}><Sidebar conversations={conversations} activeId={activeId} onSelect={(id) => { if (!isStreaming) setActiveId(id) }} onNew={newChat} onClose={() => setShowSidebar(false)} isDark={isDark} onToggleTheme={() => setIsDark((dark) => !dark)} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} sidebarCollapsed={sidebarCollapsed} user={user} onSignOut={logout} hasMoreConversations={hasMoreConversations} isLoadingConversations={isLoadingConversations} onLoadMoreConversations={loadMoreConversations} /></div><div className={`desktop-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}><Sidebar conversations={conversations} activeId={activeId} onSelect={(id) => { if (!isStreaming) setActiveId(id) }} onNew={newChat} isDark={isDark} onToggleTheme={() => setIsDark((dark) => !dark)} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} sidebarCollapsed={sidebarCollapsed} user={user} onSignOut={logout} hasMoreConversations={hasMoreConversations} isLoadingConversations={isLoadingConversations} onLoadMoreConversations={loadMoreConversations} /></div><main className="chat-area flex min-w-0 flex-1 flex-col"><header className="chat-header flex items-center justify-between border-b border-border px-4 py-3 md:px-7"><button className="icon-button mobile-only-control" onClick={() => setShowSidebar(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="ml-auto flex items-center gap-1.5"><button className={`sources-toggle flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium ${showSources ? 'selected' : ''}`} onClick={() => setShowSources(!showSources)}><PanelRight size={16} /> <span className="hidden sm:inline">Sources</span></button></div></header><div ref={chatScrollRef} className="chat-scroll flex-1 overflow-auto"><div className={`chat-content mx-auto w-full ${active ? 'has-messages' : ''}`}>{!active ? <Welcome onPrompt={(prompt) => send(prompt)} /> : isLoadingActive ? <p className="text-center text-sm text-muted-foreground">Loading conversation…</p> : <div className="message-list">{active.hasMoreMessages && <button type="button" className="mx-auto mb-4 block rounded-lg border border-border px-4 py-2 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={loadOlderMessages} disabled={isLoadingOlder}>{isLoadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}{active.messages.map((message, index) => <div key={index} className={`message-row ${message.role}`}>{message.role === 'assistant' && <div className="assistant-mark"><Sparkles size={15} /></div>}<div className={message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}>{message.role === 'assistant' ? <>{message.content ? <MarkdownText content={message.content} onCitation={openSource} sourceCount={index === latestAssistantIndex ? activeSources.length : 0} /> : message.loading ? <p className="streaming-indicator">Searching papers and drafting an answer…</p> : null}{message.loading && message.content && <span className="streaming-cursor" />}{!message.loading && message.content && <div className="response-footer"><span><Check size={13} /> Answer grounded in {message.sources?.length ?? 0} sources</span><button aria-label="More answer options"><MoreHorizontal size={15} /></button></div>}</> : <p>{message.content}</p>}</div></div>)}</div>}</div>{error && <div className="chat-error" role="alert">{error}</div>}</div><div className="composer-wrap mx-auto w-full"><div className="composer"><textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); send() } }} placeholder="Ask a question about RAG research..." rows={1} aria-label="Ask a research question" /><div className="composer-bottom"><div className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="composer-tool"><Sparkles size={14} /> Research mode</span><span className="hidden sm:inline text-muted-foreground/40">•</span><span className="hidden sm:inline">RAGWise collection</span></div><button onClick={() => send()} className="send-button" disabled={!input.trim() || isStreaming || isLoadingActive} aria-label="Send message"><ArrowUp size={17} /></button></div></div><p className="disclaimer">RAGWise can make mistakes. Verify important findings with the original papers.</p></div></main><div className={`sources-drawer ${showSources ? 'open' : ''}`}><SourcesPanel activeSources={activeSources} onClose={() => setShowSources(false)} highlightedSource={highlightedSource} /></div></div></div>
 }
 
 function Welcome({ onPrompt }: { onPrompt: (text: string) => void }) { const prompts = ['What are the latest approaches to RAG?', 'What are the main RAG evaluation methods?']; return <div className="welcome"><div className="welcome-icon"><Sparkles size={20} /></div><p className="eyebrow">Your research copilot</p><h1>Explore the RAG<br /><span>research landscape.</span></h1><p className="welcome-subtitle">Ask questions, compare methods, and trace every answer back to the papers that support it.</p><div className="prompt-grid">{prompts.map((prompt) => <button key={prompt} onClick={() => onPrompt(prompt)} className="prompt-card"><span>{prompt}</span><ArrowUp size={15} /></button>)}</div></div> }
