@@ -2,7 +2,7 @@ export const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:800
 
 export type ApiUser = { id: number; email: string; name: string; created_at: string }
 export type AuthResponse = { access_token: string; expires_in: number; user: ApiUser }
-export type ApiSource = { score?: number | null; chunk_id?: string | null; paper_id?: string | null; text?: string | null; payload?: Record<string, unknown> }
+export type ApiSource = { score?: number | null; chunk_id?: string | null; paper_id?: string | null; text?: string | null; title?: string; authors?: string[]; year?: string; payload?: Record<string, unknown> }
 export type ApiConversation = { id: string; title: string | null; created_at: string; updated_at: string }
 export type ApiConversationPage = { conversations: ApiConversation[]; has_more: boolean; next_before_updated_at: string | null; next_before_id: string | null }
 export type ApiConversationMessage = { id: number; role: 'user' | 'assistant'; content: string; sources: ApiSource[] | null; created_at: string }

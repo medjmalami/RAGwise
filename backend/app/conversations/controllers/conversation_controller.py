@@ -11,6 +11,7 @@ from app.conversations.schemas import (
     ConversationResponse,
 )
 from app.db.models import User
+from app.services.arxiv_metadata import arxiv_display_metadata
 from app.services.conversation_service import (
     get_conversation_messages,
     get_owned_conversation,
@@ -61,12 +62,19 @@ async def get_conversation(
         limit=limit,
         before_id=before_id,
     )
+    message_responses = [
+        ConversationMessageResponse.model_validate(item) for item in messages
+    ]
+    for message in message_responses:
+        for source in message.sources or []:
+            for key, value in arxiv_display_metadata(source.get("paper_id")).items():
+                source.setdefault(key, value)
     return ConversationDetailResponse(
         id=conversation.id,
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
-        messages=[ConversationMessageResponse.model_validate(item) for item in messages],
+        messages=message_responses,
         has_more=has_more,
         next_before_id=messages[0].id if has_more and messages else None,
     )
