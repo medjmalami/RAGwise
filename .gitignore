@@ -1,3 +1,4 @@
 qdrant_storage
 .env
 postgres-data
+docs
