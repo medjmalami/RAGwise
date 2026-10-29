@@ -32,6 +32,7 @@ dependencies = [
     "argon2-cffi>=25.1.0",
     "pyjwt>=2.15.1",
     "pydantic[email]>=2.13.4",
+    "deepeval>=4.3.2",
 ]
 
 [tool.uv.sources]
