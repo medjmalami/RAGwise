@@ -49,10 +49,25 @@ import os
 import sys
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, cast
 
 # Heavy / project imports are deferred into functions so `--help` works without
 # the app environment being importable.
+# --- sys.path bootstrap ---------------------------------------------------- #
+# Make the script run regardless of how it's invoked:
+#   python app/deepeval/simulate_conversations.py   (cwd=backend/)
+#   python -m app.deepeval.simulate_conversations   (cwd=backend/)
+#   python simulate_conversations.py                (cwd=app/deepeval/)
+# Two paths are needed because the script imports from two roots:
+#   - from app.graph...        -> needs backend/ on sys.path
+#   - from gen_conversational_goldens import build_llm -> needs app/deepeval/ on sys.path
+from pathlib import Path as _Path
+from typing import Any, Dict, List, Optional, cast
+
+_HERE = _Path(__file__).resolve().parent  # backend/app/deepeval/
+_REPO_ROOT = _HERE.parent.parent  # backend/
+for _p in (_HERE, _REPO_ROOT):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 DEFAULT_TOP_K = 5  # matches controller.py
 

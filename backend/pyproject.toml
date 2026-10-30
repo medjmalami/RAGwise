@@ -33,6 +33,7 @@ dependencies = [
     "pyjwt>=2.15.1",
     "pydantic[email]>=2.13.4",
     "deepeval>=4.3.2",
+    "json-repair>=0.64.2",
 ]
 
 [tool.uv.sources]
