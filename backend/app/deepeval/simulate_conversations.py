@@ -248,7 +248,24 @@ def run(args) -> None:
         list
     )  # thread_id -> per-assistant-turn details
 
+    # Cohere rate limiter: 10 RPM cap means at most 1 call every 6s.
+    # Without this, fast turns (3.5s end-to-end) would fire ~17 rerank
+    # calls/min and trigger 429 cascades. List wrapping lets the closure
+    # mutate the timestamp without `nonlocal`.
+    MIN_RERANK_INTERVAL_S = 6.1
+    last_rerank_time: List[float] = [0.0]
+
     async def model_callback(input: str, thread_id: str) -> Turn:
+        # Enforce Cohere's 10-RPM cap: sleep the remainder of the 6.1s
+        # window since the last turn started. If the previous turn took
+        # longer than 6.1s (slow generation), no wait. If it was faster,
+        # we sleep the remainder. Prevents 429 cascades.
+        now = time.perf_counter()
+        wait = MIN_RERANK_INTERVAL_S - (now - last_rerank_time[0])
+        if wait > 0:
+            await asyncio.sleep(wait)
+        last_rerank_time[0] = time.perf_counter()
+
         history = conv_histories[thread_id]
         hist_len_before = len(history)  # what the graph's rewrite node will see
         t0 = time.perf_counter()
@@ -447,7 +464,7 @@ def parse_args(argv=None):
     )
 
     g = p.add_argument_group("Simulation")
-    g.add_argument("--max-user-turns", type=int, default=5)
+    g.add_argument("--max-user-turns", type=int, default=3)
     g.add_argument(
         "--concurrency",
         type=int,
