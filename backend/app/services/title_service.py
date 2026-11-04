@@ -21,7 +21,7 @@ def _clean(raw) -> str:
     return text[:TITLE_MAX_LEN]
 
 
-async def generate_title(llm: BaseChatModel, query: str, timeout: float = 8.0) -> str:
+async def generate_title(llm: BaseChatModel, query: str, timeout: float = 30.0) -> str:
     """Never raises (except cancellation): falls back to the truncated query."""
     try:
         msg = await asyncio.wait_for(

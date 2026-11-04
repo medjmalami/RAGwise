@@ -27,18 +27,16 @@ from app.services.conversation_service import save_summary
 
 logger = logging.getLogger(__name__)
 
-# Conservative on purpose: there is no exact tokenizer for the Ollama cloud
+# Conservative on purpose: there is no exact tokenizer for the served model
 # model, and French/Arabic text tokenizes worse than English. Swap
 # estimate_tokens() if you later get real counts.
 CHARS_PER_TOKEN = 3
 MESSAGE_OVERHEAD_TOKENS = 4
 
 # What we assume a summary costs when planning (the prompt asks for <= 250 words
-# and the summary LLM has num_predict=512).
 SUMMARY_BUDGET_TOKENS = 500
 SUMMARY_MAX_CHARS = 4000
 
-# Limits on what we feed the summarizer (it runs with num_ctx=8192).
 SUMMARY_MAX_CHARS_PER_MSG = 2500
 SUMMARY_MAX_INPUT_CHARS = 20000
 

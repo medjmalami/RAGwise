@@ -34,6 +34,7 @@ dependencies = [
     "pydantic[email]>=2.13.4",
     "deepeval>=4.3.2",
     "json-repair>=0.64.2",
+    "langchain-openai>=1.6.2",
 ]
 
 [tool.uv.sources]
