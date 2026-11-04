@@ -1,4 +1,4 @@
-"""ChatOllama that turns image *paths* into base64 at the last possible moment.
+"""ChatOpenAI that turns image *paths* into base64 at the last possible moment.
 
 Why this exists
 ---------------
@@ -29,7 +29,7 @@ from langchain_core.callbacks import (
 )
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 
 IMAGE_PATH_BLOCK = "image_path"
 
@@ -52,8 +52,8 @@ def _to_data_uri(path: Path) -> str:
     return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 
-class PathImageChatOllama(ChatOllama):
-    """ChatOllama that accepts `image_path` content blocks."""
+class PathImageChatOpenAI(ChatOpenAI):
+    """ChatOpenAI that accepts `image_path` content blocks."""
 
     images_root: Path = DEFAULT_IMAGES_ROOT
 

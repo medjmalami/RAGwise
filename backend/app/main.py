@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_ollama import ChatOllama
 from langfuse import Langfuse, get_client
 from qdrant_client import QdrantClient
 
@@ -13,9 +12,9 @@ from app.config.telemetry import create_tracer_provider
 from app.conversations.routes.conversation_routes import router as conversations_router
 from app.graph.rag_graph import build_rag_graph
 from app.routes.routes import router
+from app.services.llm_factory import build_llms
 from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder
-from app.services.vision_llm import PathImageChatOllama
 
 
 @asynccontextmanager
@@ -39,40 +38,12 @@ async def lifespan(app: FastAPI):
         grpc_port=6334,
     )
 
-    print("Initializing Ollama LLM...")
-
-    app.state.llm = PathImageChatOllama(
-        model="gemma4:31b-cloud",
-        temperature=0.2,
-        num_ctx=16384,  # eval sets this, main.py doesn't
-    )
-
-    print("Initializing summary LLM...")
-    app.state.summary_llm = ChatOllama(
-        model="gemma4:31b-cloud",
-        temperature=0,
-        num_ctx=8192,
-        num_predict=512,
-        reasoning=False,
-    )
-
-    print("Initializing title LLM...")
-    app.state.title_llm = ChatOllama(
-        model="gemma4:31b-cloud",
-        temperature=0.3,
-        num_ctx=2048,
-        num_predict=64,
-        reasoning=False,
-    )
-
-    print("Initializing rewrite LLM...")
-    app.state.rewrite_llm = ChatOllama(
-        model="gemma4:31b-cloud",  # swap for a smaller model if you have one
-        temperature=0,
-        num_ctx=4096,
-        num_predict=128,
-        reasoning=False,
-    )
+    print("Initializing LLMs...")
+    llms = build_llms()
+    app.state.llm = llms.main
+    app.state.summary_llm = llms.summary
+    app.state.title_llm = llms.title
+    app.state.rewrite_llm = llms.rewrite
 
     print("Initializing Cohere reranker...")
     app.state.reranker = CohereReranker(

@@ -5,7 +5,7 @@ DIRECTLY (no FastAPI, no /answer endpoint, no SSE parsing).
 This is the drop-in replacement for `simulate_conversations.py` for people who do
 not want to stand up the HTTP server during dataset generation. It builds the
 exact same graph `main.py` builds at startup (same embedder, Qdrant client,
-PathImageChatOllama, CohereReranker, rewrite LLM) and calls `graph.ainvoke(...)`
+PathImageChatOpenAI via build_llms(), CohereReranker, rewrite LLM) and calls `graph.ainvoke(...)`
 from inside DeepEval's `model_callback`.
 
 How a turn is simulated
@@ -94,18 +94,17 @@ OUT_COLUMNS = [
 def build_graph(args):
     """Return the compiled RAG graph + the Qdrant client (to close on shutdown).
 
-    Every constructor call here is copied verbatim from `main.py`'s lifespan so
-    the dataset you generate is produced by the same code path as production.
+    The LLMs come from `build_llms()` (the same factory `main.py` uses), so the
+    dataset you generate is produced by the same code path as production.
     """
-    from langchain_ollama import ChatOllama
     from langfuse import Langfuse
     from qdrant_client import QdrantClient
 
     from app.config.config import settings
     from app.graph.rag_graph import build_rag_graph
+    from app.services.llm_factory import build_llms
     from app.services.rerank import CohereReranker
     from app.services.retrieve_from_qdrant import QueryEmbedder
-    from app.services.vision_llm import PathImageChatOllama
 
     # Langfuse must be initialised before any propagate_attributes / CallbackHandler
     # call, otherwise traces are silently dropped. Skip entirely when --no-trace.
@@ -131,21 +130,8 @@ def build_graph(args):
         grpc_port=6334,
     )
 
-    print(f"Initializing graph LLM (PathImageChatOllama, {args.graph_model})...")
-    llm = PathImageChatOllama(
-        model=args.graph_model,
-        temperature=args.graph_temperature,
-        num_ctx=args.graph_num_ctx,
-    )
-
-    print("Initializing rewrite LLM...")
-    rewrite_llm = ChatOllama(
-        model=args.graph_model,
-        temperature=0,
-        num_ctx=4096,
-        num_predict=128,
-        reasoning=False,
-    )
+    print(f"Initializing LLMs ({settings.llm_model} via {settings.llm_base_url})...")
+    llms = build_llms()
 
     print("Initializing Cohere reranker...")
     reranker = CohereReranker(
@@ -157,10 +143,10 @@ def build_graph(args):
     graph = build_rag_graph(
         embedder=embedder,
         client=client,
-        llm=llm,
+        llm=llms.main,
         reranker=reranker,
         use_images=args.use_images,
-        rewrite_llm=rewrite_llm,
+        rewrite_llm=llms.rewrite,
     )
     return graph, client
 
@@ -493,9 +479,6 @@ def parse_args(argv=None):
         action="store_false",
         help="Run text-only (use_images=False). Default is images on, like main.py.",
     )
-    g.add_argument("--graph-model", default="gemma4:31b-cloud")
-    g.add_argument("--graph-temperature", type=float, default=0.2)
-    g.add_argument("--graph-num-ctx", type=int, default=16384)
 
     g = p.add_argument_group("Simulated user (DeepEval side - same as step 1)")
     g.add_argument(

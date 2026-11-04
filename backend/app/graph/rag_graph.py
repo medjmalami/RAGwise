@@ -16,7 +16,6 @@ from langchain_core.messages import (
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
-from langchain_ollama import ChatOllama
 from langfuse import propagate_attributes
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -28,7 +27,7 @@ from app.services.retrieve_from_qdrant import (
     QueryEmbedder,
     retrieve_top_k,
 )
-from app.services.vision_llm import PathImageChatOllama, image_path_block
+from app.services.vision_llm import PathImageChatOpenAI, image_path_block
 
 logger = logging.getLogger(__name__)
 
@@ -173,8 +172,7 @@ def _format_context(
         part = f"Paper: {c['paper_id']}\nContent: {c['text']}"
         nums = (images_by_chunk or {}).get(c.get("chunk_id") or "")
         if nums:
-            # Ollama attaches images to the message, not at a position in the
-            # text, so this label is what ties each image to its chunk.
+            # images are sent as content blocks after the text; this label ties each image to its chunk.
             part += "\nAttached for this chunk: " + ", ".join(
                 f"Image {n}" for n in nums
             )
@@ -355,17 +353,17 @@ def _clean_rewrite(raw: str, original: str) -> str:
 def build_rag_graph(
     embedder: QueryEmbedder,
     client: QdrantClient,
-    llm: ChatOllama,
+    llm: BaseChatModel,
     reranker: CohereReranker,
     use_images: bool = True,
     rewrite_llm: Optional[BaseChatModel] = None,
 ) -> CompiledStateGraph:
-    if use_images and not isinstance(llm, PathImageChatOllama):
+    if use_images and not isinstance(llm, PathImageChatOpenAI):
         raise TypeError(
-            "use_images=True needs a PathImageChatOllama (app.services.vision_llm); "
+            "use_images=True needs a PathImageChatOpenAI (app.services.vision_llm); "
             "pass use_images=False to keep the text-only behavior."
         )
-    images_root = llm.images_root if isinstance(llm, PathImageChatOllama) else None
+    images_root = llm.images_root if isinstance(llm, PathImageChatOpenAI) else None
     chain = llm | StrOutputParser()
     rewrite_chain = (
         REWRITE_PROMPT | (rewrite_llm or llm) | StrOutputParser()

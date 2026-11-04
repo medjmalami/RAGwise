@@ -1,7 +1,11 @@
 """
-Evaluate the RAG graph on a Langfuse dataset (testset) with RAGAS,
-using a local Ollama model as both generator and judge, and store
+Evaluate the RAG graph on a Langfuse dataset (testset) with RAGAS and store
 the scores in Langfuse.
+
+The generator comes from the app's LLM settings (.env, via build_llms()), so
+the eval exercises the same client as production. The judge is any
+OpenAI-compatible endpoint, set with JUDGE_BASE_URL / JUDGE_API_KEY /
+JUDGE_MODEL (defaults: local Ollama's /v1 endpoint).
 
 Built on `Langfuse.run_experiment` (Langfuse Python SDK v4). For every
 dataset item it:
@@ -15,24 +19,25 @@ Usage:
     python -m app.ragas.evaluate_rag --run-name v1-text-only --no-images   # A/B baseline
 
 Requirements:
-    pip install ragas langchain-ollama langchain-huggingface sentence-transformers \
-                langfuse langgraph qdrant-client httpx
+    pip install ragas langchain-openai langchain-huggingface sentence-transformers \
+                langfuse langgraph qdrant-client
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
 import os
 import sys
 from typing import Any
 
-import httpx
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from langfuse import Evaluation, Langfuse
 from langfuse.langchain import CallbackHandler
+from pydantic import SecretStr
 from qdrant_client import QdrantClient
 from ragas import SingleTurnSample
 from ragas.embeddings import LangchainEmbeddingsWrapper
@@ -46,9 +51,9 @@ from ragas.metrics import (
 
 from app.config.config import settings
 from app.graph.rag_graph import build_rag_graph
+from app.services.llm_factory import build_llms
 from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder
-from app.services.vision_llm import PathImageChatOllama
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("evaluate_rag")
@@ -56,10 +61,15 @@ log = logging.getLogger("evaluate_rag")
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_JUDGE_MODEL = os.environ.get("OLLAMA_JUDGE_MODEL", "gemma4:31b-cloud")
-OLLAMA_GENERATOR_MODEL = os.environ.get("OLLAMA_GENERATOR_MODEL", "gemma4:31b-cloud")
-OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
+# Judge: any OpenAI-compatible endpoint. Defaults to local Ollama's /v1.
+JUDGE_BASE_URL = os.environ.get("JUDGE_BASE_URL", "http://localhost:11434/v1")
+JUDGE_API_KEY = os.environ.get("JUDGE_API_KEY", "ollama")
+JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "gemma4:31b-cloud")
+# Optional JSON, e.g. '{"reasoning_effort": "minimal"}' to keep thinking out of
+# the judge's answers on providers that inline it.
+JUDGE_EXTRA_BODY = json.loads(os.environ.get("JUDGE_EXTRA_BODY", "null"))
+JUDGE_TIMEOUT = float(os.environ.get("JUDGE_TIMEOUT", "120"))
+JUDGE_MAX_RETRIES = int(os.environ.get("JUDGE_MAX_RETRIES", "4"))
 
 # ResponseRelevancy needs an embedding model: BGE-M3 from the local HF cache.
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-m3")
@@ -67,48 +77,30 @@ EMBED_DEVICE = os.environ.get("EMBED_DEVICE", "cuda")
 
 
 # ---------------------------------------------------------------------------
-# Health check — fail fast if Ollama is unreachable or models are missing
+# Judge
 # ---------------------------------------------------------------------------
-def check_ollama(base_url: str, judge_model: str, generator_model: str) -> None:
-    """Exit with a clear error if Ollama is down or a model is missing."""
+def build_judge() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=JUDGE_MODEL,
+        base_url=JUDGE_BASE_URL,
+        api_key=SecretStr(JUDGE_API_KEY),
+        temperature=0,
+        timeout=JUDGE_TIMEOUT,
+        max_retries=JUDGE_MAX_RETRIES,
+        extra_body=JUDGE_EXTRA_BODY,
+    )
+
+
+def check_judge(judge: ChatOpenAI) -> None:
+    """Fail fast if the judge endpoint is down or the model name is wrong."""
     try:
-        resp = httpx.get(f"{base_url}/api/tags", timeout=5.0)
-        resp.raise_for_status()
-    except httpx.ConnectError:
+        judge.invoke("Reply with the single word: ok")
+    except Exception as exc:  # noqa: BLE001
         log.error(
-            "Ollama is not reachable at %s — "
-            "run `ollama serve` in another terminal, then retry.",
-            base_url,
+            "Judge '%s' not reachable at %s: %s", JUDGE_MODEL, JUDGE_BASE_URL, exc
         )
         sys.exit(1)
-    except Exception as exc:
-        log.error("Error connecting to Ollama at %s: %s", base_url, exc)
-        sys.exit(1)
-
-    available: set[str] = set()
-    for m in resp.json().get("models", []):
-        if name := m.get("name"):
-            available.add(name)
-
-    for label, model in (("judge", judge_model), ("generator", generator_model)):
-        if model not in available:
-            log.error(
-                "Ollama model '%s' (%s) not found. "
-                "Pull it with:  ollama pull %s\n"
-                "Available models: %s",
-                model,
-                label,
-                model,
-                ", ".join(sorted(available)) or "(none)",
-            )
-            sys.exit(1)
-
-    log.info(
-        "Ollama OK  —  judge=%s  generator=%s  (at %s)",
-        judge_model,
-        generator_model,
-        base_url,
-    )
+    log.info("Judge OK  —  %s  (at %s)", JUDGE_MODEL, JUDGE_BASE_URL)
 
 
 # ---------------------------------------------------------------------------
@@ -121,13 +113,7 @@ def _field(item: Any, name: str) -> Any:
 # ---------------------------------------------------------------------------
 # RAGAS setup
 # ---------------------------------------------------------------------------
-def build_metrics() -> dict[str, Any]:
-    judge = ChatOllama(
-        model=OLLAMA_JUDGE_MODEL,
-        base_url=OLLAMA_BASE_URL,
-        temperature=0,
-        num_ctx=OLLAMA_NUM_CTX,
-    )
+def build_metrics(judge: ChatOpenAI) -> dict[str, Any]:
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBED_MODEL,
         model_kwargs={"device": EMBED_DEVICE},
@@ -235,7 +221,7 @@ def make_evaluator(metrics: dict[str, Any]):
                 Evaluation(
                     name=name,
                     value=value,
-                    comment=f"ragas, judge={OLLAMA_JUDGE_MODEL}",
+                    comment=f"ragas, judge={JUDGE_MODEL}",
                 )
             )
         return evaluations
@@ -247,8 +233,9 @@ def make_evaluator(metrics: dict[str, Any]):
 # Main
 # ---------------------------------------------------------------------------
 def main(args: argparse.Namespace) -> None:
-    # --- Fail fast if Ollama is down or models are missing ----------------
-    check_ollama(OLLAMA_BASE_URL, OLLAMA_JUDGE_MODEL, OLLAMA_GENERATOR_MODEL)
+    # --- Fail fast if the judge is unreachable ------------------------------
+    judge = build_judge()
+    check_judge(judge)
 
     langfuse = Langfuse(
         public_key=settings.langfuse_public_key,
@@ -256,10 +243,11 @@ def main(args: argparse.Namespace) -> None:
         base_url=settings.langfuse_base_url,
     )
 
-    # --- RAG graph (generator now uses Ollama, not Gemini) -----------------
+    # --- RAG graph (same LLM client as main.py) -----------------------------
     log.info(
-        "Loading BGE-M3 + Qdrant + generator (Ollama: %s, images=%s) ...",
-        OLLAMA_GENERATOR_MODEL,
+        "Loading BGE-M3 + Qdrant + generator (%s via %s, images=%s) ...",
+        settings.llm_model,
+        settings.llm_base_url,
         "on" if args.images else "off",
     )
     embedder = QueryEmbedder()
@@ -270,12 +258,7 @@ def main(args: argparse.Namespace) -> None:
         prefer_grpc=True,
         grpc_port=6334,
     )
-    generator_llm = PathImageChatOllama(
-        model=OLLAMA_GENERATOR_MODEL,
-        base_url=OLLAMA_BASE_URL,
-        temperature=0.2,
-        num_ctx=OLLAMA_NUM_CTX,
-    )
+    llms = build_llms()
     reranker = CohereReranker(
         api_key=settings.cohere_api_key,
         model=settings.cohere_rerank_model,
@@ -283,12 +266,13 @@ def main(args: argparse.Namespace) -> None:
     graph = build_rag_graph(
         embedder=embedder,
         client=qdrant,
-        llm=generator_llm,
+        llm=llms.main,
         reranker=reranker,
         use_images=args.images,
+        rewrite_llm=llms.rewrite,
     )
 
-    metrics = build_metrics()
+    metrics = build_metrics(judge)
 
     # --- Dataset ------------------------------------------------------------
     dataset = langfuse.get_dataset(args.dataset)
@@ -308,8 +292,10 @@ def main(args: argparse.Namespace) -> None:
             max_concurrency=args.concurrency,
             metadata={
                 "top_k": str(args.top_k),
-                "judge_model": OLLAMA_JUDGE_MODEL,
-                "generator_model": OLLAMA_GENERATOR_MODEL,
+                "judge_model": JUDGE_MODEL,
+                "judge_base_url": JUDGE_BASE_URL,
+                "generator_model": settings.llm_model,
+                "generator_base_url": settings.llm_base_url,
                 "embed_model": EMBED_MODEL,
                 "use_images": str(args.images),
             },
@@ -360,7 +346,7 @@ def parse_args() -> argparse.Namespace:
         "--concurrency",
         type=int,
         default=1,
-        help="Items processed in parallel. Keep low for a single local GPU.",
+        help="Items processed in parallel. Keep low: the judge makes many calls per item.",
     )
     p.add_argument(
         "--no-images",
