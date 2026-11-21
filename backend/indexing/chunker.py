@@ -13,7 +13,7 @@ Produces:
     <output>/<paper_id>/<paper_id>.chunks.jsonl
 
 Usage:
-    python chunk_docling.py --input parsed/ --output chunks/ \
+    python -m indexing.chunker \
         --tokenizer BAAI/bge-m3 --max-tokens 512
 """
 
@@ -23,6 +23,11 @@ import inspect
 import json
 import sys
 from pathlib import Path
+
+try:
+    from .paths import CHUNKS_DIR, PARSED_DIR
+except ImportError:  # Also allow `python indexing/chunker.py`.
+    from paths import CHUNKS_DIR, PARSED_DIR
 
 
 def build_chunker(tokenizer_name: str, max_tokens: int, merge_peers: bool):
@@ -235,17 +240,19 @@ def main():
     )
     parser.add_argument(
         "--input",
-        type=str,
-        required=True,
-        help="Stage 1 output directory (contains <paper_id>/<paper_id>.docling.json).",
+        type=Path,
+        default=PARSED_DIR,
+        help="Stage 1 output directory (default: backend/arxiv_rag_papers/parsed).",
     )
     parser.add_argument(
         "--output",
-        type=str,
-        required=True,
-        help="Output directory. Chunks for each paper are written to "
-        "<output>/<paper_id>/<paper_id>.chunks.jsonl (mirrors the Stage 1 "
-        "--output layout).",
+        type=Path,
+        default=CHUNKS_DIR,
+        help=(
+            "Output directory (default: backend/arxiv_rag_papers/chunks). "
+            "Chunks are written to <output>/<paper_id>/<paper_id>.chunks.jsonl "
+            "(mirrors the Stage 1 --output layout)."
+        ),
     )
     parser.add_argument(
         "--tokenizer",
@@ -285,8 +292,8 @@ def main():
 
     args = parser.parse_args()
 
-    input_dir = Path(args.input).resolve()
-    output_dir = Path(args.output).resolve()
+    input_dir = args.input.resolve()
+    output_dir = args.output.resolve()
 
     if not input_dir.is_dir():
         print(f"Error: Input directory '{input_dir}' does not exist.")

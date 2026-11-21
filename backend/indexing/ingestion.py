@@ -8,13 +8,22 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-METADATA_FILE = Path("arxiv_rag_metadata.jsonl")
-
-HTML_DIR = Path("arxiv_rag_papers/html")
-ASSETS_DIR = Path("arxiv_rag_papers/assets")
-
-FAILED_FILE = Path("arxiv_rag_papers/html_failed.jsonl")
-IMAGE_FAILED_FILE = Path("arxiv_rag_papers/image_failed.jsonl")
+try:
+    from .paths import (
+        ASSETS_DIR,
+        FAILED_FILE,
+        HTML_DIR,
+        IMAGE_FAILED_FILE,
+        METADATA_FILE,
+    )
+except ImportError:  # Also allow `python indexing/ingestion.py`.
+    from paths import (
+        ASSETS_DIR,
+        FAILED_FILE,
+        HTML_DIR,
+        IMAGE_FAILED_FILE,
+        METADATA_FILE,
+    )
 
 BASE_URL = "https://arxiv.org/html"
 

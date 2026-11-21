@@ -17,11 +17,14 @@ from typing import Optional
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+try:
+    from .paths import ASSETS_DIR, HTML_DIR, PREPROCESSED_HTML_DIR
+except ImportError:  # Also allow `python indexing/preprocess.py`.
+    from paths import ASSETS_DIR, HTML_DIR, PREPROCESSED_HTML_DIR
 
-INPUT_DIR = SCRIPT_DIR / ".." / "arxiv_rag_papers" / "html"
-ASSETS_DIR = SCRIPT_DIR / ".." / "arxiv_rag_papers" / "assets"
-OUTPUT_DIR = SCRIPT_DIR / ".." / "arxiv_rag_papers" / "preprocessed_html"
+
+INPUT_DIR = HTML_DIR
+OUTPUT_DIR = PREPROCESSED_HTML_DIR
 
 SKIP_IMAGE_FILENAMES = {
     "arxiv-logo-primary-light.svg",
