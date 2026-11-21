@@ -39,3 +39,15 @@ dependencies = [
 
 [tool.uv.sources]
 docling-slim = { git = "https://github.com/medjmalami/docling.git", rev = "2b63ba80dafeed09d36efeccba347f7753f57810" }
+
+[tool.basedpyright]
+include = ["app"]
+exclude = [
+    "**/.venv",
+    "**/venv",
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.git",
+    "**/postgres-data"
+]
+typeCheckingMode = "standard"
