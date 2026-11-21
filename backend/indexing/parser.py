@@ -17,7 +17,13 @@ from typing import Any
 from dotenv import load_dotenv
 from pydantic import AnyUrl
 
-load_dotenv()
+try:
+    from .paths import BACKEND_DIR, PARSED_DIR, PREPROCESSED_HTML_DIR
+except ImportError:  # Also allow `python indexing/parser.py`.
+    from paths import BACKEND_DIR, PARSED_DIR, PREPROCESSED_HTML_DIR
+
+
+load_dotenv(BACKEND_DIR / ".env")
 
 
 def build_picture_description_options(api_key: str, model: str):
@@ -70,12 +76,21 @@ def main():
     )
     parser.add_argument(
         "--input",
-        type=str,
-        required=True,
-        help="Input directory containing HTML files.",
+        type=Path,
+        default=PREPROCESSED_HTML_DIR,
+        help=(
+            "Input directory containing HTML files "
+            "(default: backend/arxiv_rag_papers/preprocessed_html)."
+        ),
     )
     parser.add_argument(
-        "--output", type=str, required=True, help="Output directory for parsed files."
+        "--output",
+        type=Path,
+        default=PARSED_DIR,
+        help=(
+            "Output directory for parsed files "
+            "(default: backend/arxiv_rag_papers/parsed)."
+        ),
     )
     parser.add_argument(
         "--limit",
@@ -103,8 +118,8 @@ def main():
 
     args = parser.parse_args()
 
-    input_dir = Path(args.input).resolve()
-    output_dir = Path(args.output).resolve()
+    input_dir = args.input.resolve()
+    output_dir = args.output.resolve()
 
     if not input_dir.is_dir():
         print(f"Error: Input directory '{input_dir}' does not exist.")

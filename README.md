@@ -144,7 +144,7 @@ Token counts are estimates based on message characters and overhead, not counts 
 
 The indexing pipeline is optional if you already have a populated Qdrant collection. Its local working directories live under `backend/arxiv_rag_papers/` and are ignored by Git.
 
-Run the commands from `backend/`:
+Run the stages from `backend/`, in this order. Each stage uses the same canonical directories by default, so no files need to be moved between commands:
 
 ```bash
 # Download available arXiv HTML and image assets into arxiv_rag_papers/
@@ -154,24 +154,20 @@ uv run python -m indexing.ingestion
 uv run python -m indexing.preprocess
 
 # Parse preprocessed HTML into Docling documents (needs GEMINI_API_KEY unless disabled)
-uv run python -m indexing.parser \
-  --input arxiv_rag_papers/preprocessed_html \
-  --output arxiv_rag_papers/parsed
+uv run python -m indexing.parser
 
 # Create contextualized, token-aware chunks
 uv run python -m indexing.chunker \
-  --input arxiv_rag_papers/parsed \
-  --output arxiv_rag_papers/chunks \
   --tokenizer BAAI/bge-m3 \
   --max-tokens 512
 
 # Embed chunks and upsert dense and sparse vectors to Qdrant
-uv run python -m indexing.embeder \
-  --input arxiv_rag_papers/chunks \
-  --collection ragwise_arxiv
+uv run python -m indexing.embeder --collection ragwise_arxiv
 ```
 
-The ingestion and preprocessing scripts use paths relative to their own source directory. Parser, chunker, and embedder accept `--limit` for small runs. The embedder also accepts `--device cpu` or `--device cuda`; see each script's `--help` for resumability, batch, and collection options. Parsing with `--no-picture-description` avoids the Gemini request, but figure descriptions will not be added.
+The canonical locations are `backend/arxiv_rag_papers/html`, `assets`, `preprocessed_html`, `parsed`, and `chunks`; embedding markers are stored in `backend/embed_state`. All indexing stages resolve these defaults from the repository, rather than from the shell's current directory. Parser, chunker, and embedder accept `--limit` for small runs. The embedder also accepts `--device cpu` or `--device cuda`; see each script's `--help` for resumability, batch, and collection options. Parsing with `--no-picture-description` avoids the Gemini request, but figure descriptions will not be added.
+
+`papersDownload.py` is a separate PDF/metadata utility and is not part of this HTML pipeline. Do not run it as an additional stage: it writes a different acquisition format and rewrites the metadata file used by `ingestion.py`.
 
 The API and evaluation harness query the `ragwise_arxiv` collection by default. Keep the collection name and embedding model consistent between indexing and serving.
 

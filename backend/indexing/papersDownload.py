@@ -7,8 +7,10 @@ Respects arXiv's API usage guidance:
 - resumable: already-downloaded PDFs are skipped on re-run
 
 Usage:
-    python download_arxiv_papers.py            # test run, 50 papers, metadata + PDFs
-    Then edit main() at the bottom to remove the limit for the full 3060.
+    python -m indexing.papersDownload            # metadata + PDFs
+
+This is a separate PDF-download utility. It is not a stage in the HTML
+indexing pipeline documented in the project README.
 """
 
 import json
@@ -19,9 +21,13 @@ import time
 import feedparser
 import requests
 
+try:
+    from .paths import METADATA_FILE, PAPERS_DIR
+except ImportError:  # Also allow `python indexing/papersDownload.py`.
+    from paths import METADATA_FILE, PAPERS_DIR
+
 BASE_URL = "http://export.arxiv.org/api/query"
-OUTPUT_DIR = "../arxiv_rag_papers"
-METADATA_FILE = "../arxiv_rag_metadata.jsonl"
+OUTPUT_DIR = PAPERS_DIR
 BATCH_SIZE = 100  # papers per API request
 SLEEP_BETWEEN_REQUESTS = 3  # seconds, per arXiv API terms of use
 SLEEP_BETWEEN_DOWNLOADS = 1  # seconds, be polite to the PDF mirror
@@ -109,7 +115,7 @@ def main(download_pdfs=True, limit=None):
             count += 1
 
             if download_pdfs and paper["pdf_url"]:
-                dest = os.path.join(OUTPUT_DIR, safe_filename(paper["id"]))
+                dest = OUTPUT_DIR / safe_filename(paper["id"])
                 status = download_pdf(paper["pdf_url"], dest, session)
                 print(f"[{count}] {paper['id']} - {status}")
                 time.sleep(SLEEP_BETWEEN_DOWNLOADS)

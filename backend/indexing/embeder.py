@@ -18,7 +18,7 @@ Point IDs are deterministic (uuid5 of chunk_id), so re-running with --force
 overwrites the same points instead of duplicating them.
 
 Usage:
-    python embed_to_qdrant.py --input chunks/ --collection ragwise_arxiv
+    python -m indexing.embeder --collection ragwise_arxiv
 """
 
 import argparse
@@ -29,6 +29,11 @@ import time
 import uuid
 from pathlib import Path
 from typing import cast
+
+try:
+    from .paths import CHUNKS_DIR, EMBED_STATE_DIR
+except ImportError:  # Also allow `python indexing/embeder.py`.
+    from paths import CHUNKS_DIR, EMBED_STATE_DIR
 
 # Fixed namespace so uuid5(CHUNK_ID_NAMESPACE, chunk_id) is stable across runs/machines.
 CHUNK_ID_NAMESPACE = uuid.UUID("d6e1b3c2-8f2a-4b7a-9c1d-2f6a7e9b0c3d")
@@ -213,15 +218,15 @@ def main():
     )
     parser.add_argument(
         "--input",
-        type=str,
-        required=True,
-        help="Stage 2 output directory (contains <paper_id>/<paper_id>.chunks.jsonl).",
+        type=Path,
+        default=CHUNKS_DIR,
+        help="Stage 2 output directory (default: backend/arxiv_rag_papers/chunks).",
     )
     parser.add_argument(
         "--state-dir",
-        type=str,
-        default="embed_state",
-        help="Directory for per-paper '<paper_id>.done' marker files (resume support).",
+        type=Path,
+        default=EMBED_STATE_DIR,
+        help="Directory for per-paper '<paper_id>.done' marker files (default: backend/embed_state).",
     )
     parser.add_argument("--collection", type=str, default="ragwise_arxiv")
     parser.add_argument(
@@ -308,8 +313,8 @@ def main():
 
     args = parser.parse_args()
 
-    input_dir = Path(args.input).resolve()
-    state_dir = Path(args.state_dir).resolve()
+    input_dir = args.input.resolve()
+    state_dir = args.state_dir.resolve()
     state_dir.mkdir(parents=True, exist_ok=True)
 
     if not input_dir.is_dir():
