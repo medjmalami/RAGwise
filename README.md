@@ -218,6 +218,31 @@ uv run python -m app.ragas.evaluate_rag --run-name baseline --top-k 5
 
 Options include `--dataset` (default `ragwise_ragas_testset`), `--run-name`, `--top-k`, `--limit`, `--concurrency`, and `--no-images`. The Ollama generator and judge model names, base URL, context length, and embedding device can be overridden with `OLLAMA_GENERATOR_MODEL`, `OLLAMA_JUDGE_MODEL`, `OLLAMA_BASE_URL`, `OLLAMA_NUM_CTX`, and `EMBED_DEVICE` (set `EMBED_DEVICE=cpu` when evaluating without CUDA).
 
+### DeepEval conversational evaluation
+
+`backend/app/deepeval/evaluate_deepeval.py` is the unified conversational
+workflow. It reads one conversational golden per item from the Langfuse dataset,
+simulates the multi-turn conversation against the RAG graph, and stores one
+aggregate DeepEval `TurnContextualRelevancyMetric` score on the Langfuse dataset
+run. All turns for an item use the same Langfuse session and remain grouped under
+the experiment item trace. The local CSV files are not read or written by this
+workflow.
+
+The default dataset is `ragwise_deepeval_conversational_goldens`, created by
+`app.deepeval.upload_goldens_langfuse`:
+
+```bash
+cd backend
+uv run python -m app.deepeval.evaluate_deepeval --limit 1
+uv run python -m app.deepeval.evaluate_deepeval --run-name baseline --top-k 5
+```
+
+Useful options include `--dataset`, `--run-name`, `--limit`, `--concurrency`,
+`--max-user-turns`, `--top-k`, `--no-images`, `--model`, `--judge-model`,
+`--judge-host`, and `--no-trace`. The simulated-user model uses `OLLAMA_MODEL`
+and `OLLAMA_HOST` by default; the judge uses `JUDGE_MODEL` or
+`OLLAMA_JUDGE_MODEL`, and `JUDGE_OLLAMA_HOST` or `OLLAMA_HOST`.
+
 ### Evaluation results
 
 These results were measured on the 100-question synthetic testset with RAGAS, using local Ollama `gemma4:31b` as the judge and BGE-M3 embeddings for answer relevancy.
