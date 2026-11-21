@@ -234,6 +234,7 @@ These results come from a single run on a 100-question synthetic testset, so dif
 
 ## Development notes
 
+- Contributor workflow, coding conventions, validation guidance, and pull request expectations are documented in [AGENTS.md](AGENTS.md).
 - Run Python commands with `backend/` as the working directory; the backend package and its `.env` are resolved from there.
 - The Compose file starts PostgreSQL and Qdrant only. Run Ollama separately. Langfuse can run as a local self-hosted v4 instance or through Langfuse Cloud; `LANGFUSE_BASE_URL` selects the endpoint. See the [official Langfuse self-hosting documentation](https://langfuse.com/self-hosting) for deployment instructions.
 - Langfuse configuration is required: the backend settings require its keys and base URL at import, and startup initializes the Langfuse client and trace exporter. The application does not provide a no-Langfuse mode.
