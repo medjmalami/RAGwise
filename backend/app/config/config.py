@@ -1,9 +1,16 @@
 from typing import Literal, Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    semantic_cache_enabled: bool = True
+    semantic_cache_collection: str = "ragwise_cache"
+    semantic_cache_threshold: float = Field(default=0.92, ge=0, le=1)
+    semantic_cache_ttl_seconds: int = Field(default=604800, gt=0)
+    semantic_cache_timeout_seconds: float = Field(default=2.0, gt=0)
+    semantic_cache_corpus_version: str = "1"
     database_url: str
     gemini_api_key: str
     langfuse_public_key: str
@@ -40,6 +47,17 @@ class Settings(BaseSettings):
     llm_rewrite_model: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env")
+
+    def cache_options(self):
+        from app.services.semantic_cache import CacheOptions
+
+        return CacheOptions(
+            collection=self.semantic_cache_collection,
+            threshold=self.semantic_cache_threshold,
+            ttl_seconds=self.semantic_cache_ttl_seconds,
+            timeout_seconds=self.semantic_cache_timeout_seconds,
+            corpus_version=self.semantic_cache_corpus_version,
+        )
 
 
 settings = Settings()  # type: ignore[call-arg]

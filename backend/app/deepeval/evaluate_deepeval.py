@@ -170,6 +170,8 @@ def build_graph(args: argparse.Namespace):
         reranker=reranker,
         use_images=args.use_images,
         rewrite_llm=llms.rewrite,
+        use_cache=args.use_cache,
+        cache_options=settings.cache_options(),
     )
     return graph, qdrant
 
@@ -669,6 +671,7 @@ def run(args: argparse.Namespace) -> Any:
                 "generator_model": settings.llm_model,
                 "generator_base_url": settings.llm_base_url,
                 "use_images": str(args.use_images),
+                "use_cache": str(args.use_cache),
                 "metric": CONTEXTUAL_RELEVANCY_NAME,
             },
         )
@@ -734,6 +737,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     simulation.add_argument("--temperature", type=float, default=0.7)
 
     graph = parser.add_argument_group("RAG graph")
+    graph.add_argument("--use-cache", action="store_true", help="Opt into semantic caching; disabled for baseline evaluations")
     graph.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     graph.add_argument(
         "--no-images",

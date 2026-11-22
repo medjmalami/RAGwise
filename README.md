@@ -72,6 +72,45 @@ Create `backend/.env` from `backend/.env.example` and provide the backend settin
 
 `QDRANT_URL` and `QDRANT_API_KEY` are optional; the defaults are `http://localhost:6333` and no API key. History-summary thresholds and token settings also have defaults in `backend/app/config/config.py`.
 
+### Semantic response cache
+
+Serving enables a shared first-question cache in `ragwise_cache`. Follow-ups
+(including summary-only history) bypass it. Hits restore the answer, ordered
+sources, and image references through the same SSE protocol, then save a normal
+conversation turn. Answers with no sources, reranking/image fallback, or common
+abstention phrases are not cached. Abstention detection is heuristic.
+
+Configure these optional values in `backend/.env`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SEMANTIC_CACHE_ENABLED` | `true` | Enable caching for the serving endpoint |
+| `SEMANTIC_CACHE_COLLECTION` | `ragwise_cache` | Separate Qdrant collection |
+| `SEMANTIC_CACHE_THRESHOLD` | `0.92` | Minimum dense cosine similarity |
+| `SEMANTIC_CACHE_TTL_SECONDS` | `604800` | Seven-day expiry from write time |
+| `SEMANTIC_CACHE_TIMEOUT_SECONDS` | `2` | Cache I/O timeout, excluding embedding |
+| `SEMANTIC_CACHE_CORPUS_VERSION` | `1` | Bump after reindexing or changing image assets |
+
+Model, prompt, reranker, image-mode, and retrieval-setting changes isolate cache
+entries automatically. Corpus changes require the explicit version bump above.
+Expired entries are excluded during lookup and deleted at startup and hourly.
+Cache errors fall back to normal processing; startup failure disables caching
+until the next backend restart. The cache shares Qdrant availability with the
+corpus, so an outage that also prevents retrieval can still fail a request.
+
+Startup ensures the cache collection and indexes. To provision manually, run
+`uv run python scripts/init_qdrant.py --skip-main` from `backend/` (this script
+reads exported environment variables, not `.env`). It also supports
+`--purge-expired`. Existing collections are never recreated.
+
+`build_rag_graph` defaults to `use_cache=False`. Both RAGAS and DeepEval retain
+uncached evaluation baselines; pass `--use-cache` only for explicit cache
+experiments, after provisioning the collection. Serving opts in separately.
+
+Run focused regression checks from `backend/`:
+`PYTHONPATH=. uv run python scripts/test_semantic_cache.py`.
+
+
 The frontend uses `NEXT_PUBLIC_API_URL`, defaulting to `http://localhost:8000`. No frontend env file is required for the local defaults.
 
 ### 2. Start PostgreSQL and Qdrant

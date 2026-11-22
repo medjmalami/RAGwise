@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Optional, TypedDict, cast
 
@@ -16,7 +17,7 @@ from langchain_core.messages import (
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
-from langfuse import propagate_attributes
+from langfuse import get_client, propagate_attributes
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from qdrant_client import QdrantClient, models
@@ -25,7 +26,15 @@ from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import (
     DEFAULT_COLLECTION,
     QueryEmbedder,
+    embed_query,
     retrieve_top_k,
+)
+from app.services.semantic_cache import (
+    CacheOptions,
+    SemanticCache,
+    fingerprint,
+    validate_payload,
+    write_skip_reason,
 )
 from app.services.vision_llm import PathImageChatOpenAI, image_path_block
 
@@ -131,6 +140,12 @@ class _RAGInput(TypedDict):
 
 
 class RAGState(_RAGInput, total=False):
+    cache_status: str  # hit / miss / error / skipped (lookup outcome)
+    cache_score: Optional[float]
+    cache_embedding: Optional[dict]  # dense + sparse, reused by retrieval and write
+    cache_write_status: str
+    cache_skip_reason: Optional[str]
+    cache_created_at: Optional[int]
     rewritten_query: str  # standalone query used for retrieval + rerank
     candidates: list[dict]  # slim metadata of the 50 hybrid candidates (pre-rerank)
     chunks: list[dict]  # Cohere top_k, full chunks (text untouched by the image step)
@@ -357,6 +372,9 @@ def build_rag_graph(
     reranker: CohereReranker,
     use_images: bool = True,
     rewrite_llm: Optional[BaseChatModel] = None,
+    use_cache: bool = False,
+    cache: Optional[SemanticCache] = None,
+    cache_options: Optional[CacheOptions] = None,
 ) -> CompiledStateGraph:
     if use_images and not isinstance(llm, PathImageChatOpenAI):
         raise TypeError(
@@ -368,6 +386,135 @@ def build_rag_graph(
     rewrite_chain = (
         REWRITE_PROMPT | (rewrite_llm or llm) | StrOutputParser()
     ).with_config(run_name="rewrite_query")
+
+    options = cache.options if cache is not None else (cache_options or CacheOptions())
+    cache_store = cache or (SemanticCache(client, options) if use_cache else None)
+    # Explicit allowlist: never fingerprint credentials or serialize the entire client.
+    cache_config = {
+        "schema": 1,
+        "corpus": options.corpus_version,
+        "collection": DEFAULT_COLLECTION,
+        "embedder": [embedder.model_name, embedder.max_length],
+        "llm_class": type(llm).__name__,
+        "llm": {
+            key: getattr(llm, key, None)
+            for key in (
+                "model_name",
+                "openai_api_base",
+                "temperature",
+                "max_tokens",
+                "model_kwargs",
+                "extra_body",
+                "reasoning_effort",
+                "seed",
+                "top_p",
+            )
+        },
+        "reranker": reranker.model,
+        "candidates": RERANK_CANDIDATES,
+        "prompts": [SYSTEM_PROMPT, HUMAN_PROMPT.model_dump(), IMAGE_NOTE],
+        "images": [use_images, MAX_IMAGES_PER_CHUNK, MAX_IMAGES_TOTAL],
+    }
+
+    def version(state: RAGState) -> str:
+        return fingerprint(
+            {
+                **cache_config,
+                "top_k": state["top_k"],
+                "paper_id": state.get("paper_id"),
+                "has_picture": state.get("has_picture"),
+            }
+        )
+
+    def trace_cache(update: dict) -> dict:
+        metadata = {
+            key: str(value)
+            for key, value in update.items()
+            if key.startswith("cache_")
+            and key != "cache_embedding"
+            and value is not None
+        }
+        metadata["use_cache"] = str(use_cache).lower()
+        if update.get("cache_created_at") is not None:
+            metadata["cache_age_seconds"] = str(
+                max(0, int(time.time()) - update["cache_created_at"])
+            )
+        tags = ["cache:on" if use_cache else "cache:off"]
+        if update.get("cache_status"):
+            tags.append("cache:" + update["cache_status"])
+        if update.get("cache_status") == "hit":
+            used = update.get("images_used", [])
+            tags.append("with_images" if used else "text_only")
+            metadata.update(
+                images_used=str(bool(used)).lower(),
+                num_images=str(len(used)),
+                image_paths=", ".join(i["path"] for i in used),
+            )
+        # A child observation makes propagation visible even on hits (no LLM call).
+        try:
+            with propagate_attributes(tags=tags, metadata=metadata):
+                with get_client().start_as_current_observation(
+                    name="semantic-cache", as_type="span", metadata=metadata
+                ):
+                    pass
+        except Exception:
+            logger.exception("Cache telemetry failed")
+        return update
+
+    async def read_cache(state: RAGState) -> dict:
+        update: dict = {
+            "cache_status": "miss",
+            "cache_score": None,
+            "cache_embedding": None,
+            "cache_write_status": "pending",
+            "cache_skip_reason": None,
+            "cache_created_at": None,
+            "rewritten_query": state["query"],
+        }
+        try:
+            # Compute sparse weights too: a miss can reuse the complete hybrid embedding.
+            embedded = await asyncio.to_thread(embed_query, state["query"], embedder)
+            update["cache_embedding"] = embedded
+            assert cache_store is not None
+            hit = await cache_store.read(
+                embedded["dense"], version(state), state["top_k"]
+            )
+            if hit is not None:
+                update["cache_score"] = float(hit.score)
+                try:
+                    restored = validate_payload(hit.payload or {}, images_root)
+                    created_at = int((hit.payload or {})["created_at"])
+                except (KeyError, TypeError, ValueError, OSError):
+                    update["cache_skip_reason"] = "invalid_payload"
+                else:
+                    update.update(restored)
+                    update.update(
+                        cache_status="hit",
+                        cache_write_status="skipped",
+                        cache_created_at=created_at,
+                    )
+        except Exception:
+            logger.exception("Cache read failed; continuing with retrieval")
+            update["cache_status"] = "error"
+        return trace_cache(update)
+
+    async def write_cache(state: RAGState) -> dict:
+        reason = write_skip_reason(state)
+        embedded = state.get("cache_embedding")
+        if reason or not embedded:
+            return trace_cache(
+                {
+                    "cache_write_status": "skipped",
+                    "cache_skip_reason": reason or "no_embedding",
+                }
+            )
+        try:
+            assert cache_store is not None
+            await cache_store.write(embedded["dense"], version(state), dict(state))
+            return trace_cache({"cache_write_status": "written"})
+        except Exception:
+            logger.exception("Cache write failed; keeping generated answer")
+            return trace_cache({"cache_write_status": "error"})
 
     async def rewrite(state: RAGState, config: RunnableConfig) -> dict:
         query = state["query"]
@@ -392,6 +539,22 @@ def build_rag_graph(
         return {"rewritten_query": rewritten}
 
     async def retrieve(state: RAGState) -> dict:
+        bypass = not use_cache or bool(
+            state.get("history") or state.get("history_summary")
+        )
+        cache_update = (
+            trace_cache(
+                {
+                    "cache_status": "skipped",
+                    "cache_score": None,
+                    "cache_embedding": None,
+                    "cache_write_status": "skipped",
+                    "cache_skip_reason": "follow_up" if use_cache else "disabled",
+                }
+            )
+            if bypass
+            else {}
+        )
         top_k = state["top_k"]
         search_query = state.get("rewritten_query") or state["query"]
         candidate_k = max(RERANK_CANDIDATES, top_k)
@@ -404,6 +567,10 @@ def build_rag_graph(
                 collection=DEFAULT_COLLECTION,
                 k=candidate_k,
                 prefetch_limit=candidate_k,
+                embedded=state.get("cache_embedding")
+                if use_cache
+                and not (state.get("history") or state.get("history_summary"))
+                else None,
                 query_filter=_build_filter(
                     state.get("paper_id"), state.get("has_picture")
                 ),
@@ -411,7 +578,12 @@ def build_rag_graph(
         except Exception as e:
             raise RetrievalError(str(e)) from e
         if not candidates:
-            return {"candidates": [], "chunks": []}
+            return {
+                **cache_update,
+                "candidates": [],
+                "chunks": [],
+                "rerank_fallback": False,
+            }
         # Tag each candidate with its hybrid rank before reranking. The
         # reranker copies the dict, so this survives into the final chunks
         # and you can see how far Cohere moved each one.
@@ -428,6 +600,7 @@ def build_rag_graph(
             rerank_fallback = True
 
         return {
+            **cache_update,
             "candidates": [_slim_candidate(c) for c in candidates],
             "chunks": chunks,
             "rerank_fallback": rerank_fallback,
@@ -513,14 +686,38 @@ def build_rag_graph(
     builder.add_node("rewrite", rewrite)
     builder.add_node("retrieve", retrieve)
     builder.add_node("generate", generate)
+    if use_cache:
+        builder.add_node("read_cache", read_cache)
+        builder.add_node("write_cache", write_cache)
+        builder.add_conditional_edges(
+            "read_cache",
+            lambda s: END if s.get("cache_status") == "hit" else "retrieve",
+            {END: END, "retrieve": "retrieve"},
+        )
+        builder.add_edge("write_cache", END)
     builder.add_conditional_edges(
         START,
         lambda s: (
-            "rewrite" if (s.get("history") or s.get("history_summary")) else "retrieve"
+            "rewrite"
+            if (s.get("history") or s.get("history_summary"))
+            else ("read_cache" if use_cache else "retrieve")
         ),
-        {"rewrite": "rewrite", "retrieve": "retrieve"},
+        {
+            "rewrite": "rewrite",
+            "retrieve": "retrieve",
+            **({"read_cache": "read_cache"} if use_cache else {}),
+        },
     )
     builder.add_edge("rewrite", "retrieve")
     builder.add_edge("retrieve", "generate")
-    builder.add_edge("generate", END)
+    if use_cache:
+        builder.add_conditional_edges(
+            "generate",
+            lambda s: (
+                END if (s.get("history") or s.get("history_summary")) else "write_cache"
+            ),
+            {END: END, "write_cache": "write_cache"},
+        )
+    else:
+        builder.add_edge("generate", END)
     return builder.compile()

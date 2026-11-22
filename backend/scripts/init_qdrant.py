@@ -8,7 +8,7 @@ Create the Qdrant collections RAGwise needs, skipping any that already exist.
                    indexes on cache_version (keyword), top_k (integer),
                    expires_at (integer, unix seconds).
 
-An existing collection is never modified or recreated.
+Existing collections are never recreated. Missing cache payload indexes are added.
 
 Usage:
     python scripts/init_qdrant.py
@@ -24,8 +24,13 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
 
 from qdrant_client import QdrantClient, models
+
+# Support direct execution from backend/ without requiring PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.services.semantic_cache import ensure_cache_collection
 
 DENSE_DIM = 1024  # BGE-M3 dense output size.
 DEFAULT_MAIN_COLLECTION = "ragwise_arxiv"
@@ -73,39 +78,6 @@ def ensure_main_collection(
     return True
 
 
-def ensure_cache_collection(client: QdrantClient, name: str) -> bool:
-    """Create the semantic-cache collection. Returns True if created."""
-    if client.collection_exists(name):
-        print(f"[skip]   '{name}' already exists.")
-        return False
-
-    print(f"[create] '{name}' (dense={DENSE_DIM}d, in RAM)")
-    client.create_collection(
-        collection_name=name,
-        vectors_config={
-            "dense": models.VectorParams(
-                size=DENSE_DIM, distance=models.Distance.COSINE, on_disk=False
-            ),
-        },
-    )
-    client.create_payload_index(
-        collection_name=name,
-        field_name="cache_version",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    client.create_payload_index(
-        collection_name=name,
-        field_name="top_k",
-        field_schema=models.PayloadSchemaType.INTEGER,
-    )
-    client.create_payload_index(
-        collection_name=name,
-        field_name="expires_at",
-        field_schema=models.PayloadSchemaType.INTEGER,
-    )
-    return True
-
-
 def purge_expired(client: QdrantClient, name: str) -> None:
     if not client.collection_exists(name):
         print(f"[skip]   '{name}' does not exist, nothing to purge.")
@@ -146,7 +118,9 @@ def main() -> None:
     parser.add_argument("--qdrant-grpc-port", type=int, default=6334)
     parser.add_argument("--collection", type=str, default=DEFAULT_MAIN_COLLECTION)
     parser.add_argument(
-        "--cache-collection", type=str, default=DEFAULT_CACHE_COLLECTION
+        "--cache-collection",
+        type=str,
+        default=os.environ.get("SEMANTIC_CACHE_COLLECTION", DEFAULT_CACHE_COLLECTION),
     )
     parser.add_argument(
         "--no-sparse",
@@ -200,7 +174,11 @@ def main() -> None:
                 on_disk=not args.vectors_in_ram,
             )
         if not args.skip_cache:
-            ensure_cache_collection(client, args.cache_collection)
+            created = ensure_cache_collection(client, args.cache_collection)
+            status = "create" if created else "ready"
+            print(
+                f"[{status}]  '{args.cache_collection}' cache collection and indexes ready."
+            )
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)

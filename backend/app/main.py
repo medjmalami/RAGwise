@@ -1,5 +1,8 @@
+import asyncio
+import logging
+import math
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +16,7 @@ from app.conversations.routes.conversation_routes import router as conversations
 from app.graph.rag_graph import build_rag_graph
 from app.routes.routes import router
 from app.services.llm_factory import build_llms
+from app.services.semantic_cache import SemanticCache
 from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder
 
@@ -51,6 +55,26 @@ async def lifespan(app: FastAPI):
         model=settings.cohere_rerank_model,
     )
 
+    cache = None
+    cache_client = None
+    cleanup_task = None
+    if settings.semantic_cache_enabled:
+        # A separate transport bounds cache I/O without shortening retrieval timeouts.
+        try:
+            cache_client = QdrantClient(
+                url=os.environ.get("QDRANT_URL", "http://localhost:6333"),
+                api_key=os.environ.get("QDRANT_API_KEY"),
+                timeout=max(1, math.ceil(settings.semantic_cache_timeout_seconds)),
+            )
+            candidate_cache = SemanticCache(cache_client, settings.cache_options())
+            await candidate_cache.initialize()
+            cache = candidate_cache
+            cleanup_task = asyncio.create_task(cache.cleanup_loop())
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Cache initialization failed; serving without cache"
+            )
+
     print("Building RAG graph...")
     app.state.rag_graph = build_rag_graph(
         embedder=app.state.embedder,
@@ -58,14 +82,23 @@ async def lifespan(app: FastAPI):
         llm=app.state.llm,
         reranker=app.state.reranker,
         rewrite_llm=app.state.rewrite_llm,
+        use_cache=cache is not None,
+        cache=cache,
     )
 
-    yield  # Server runs here, handling requests
-
-    # --- SHUTDOWN ---
-    print("Shutting down: Closing Qdrant connection...")
-    app.state.qdrant_client.close()
-    get_client().shutdown()
+    try:
+        yield  # Server runs here, handling requests
+    finally:
+        # --- SHUTDOWN ---
+        print("Shutting down: Closing Qdrant connection...")
+        if cleanup_task is not None:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
+        if cache_client is not None:
+            cache_client.close()
+        app.state.qdrant_client.close()
+        get_client().shutdown()
 
 
 app = FastAPI(
