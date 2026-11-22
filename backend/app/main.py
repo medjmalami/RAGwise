@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import os
 from contextlib import asynccontextmanager, suppress
 
@@ -63,7 +64,7 @@ async def lifespan(app: FastAPI):
             cache_client = QdrantClient(
                 url=os.environ.get("QDRANT_URL", "http://localhost:6333"),
                 api_key=os.environ.get("QDRANT_API_KEY"),
-                timeout=settings.semantic_cache_timeout_seconds,
+                timeout=max(1, math.ceil(settings.semantic_cache_timeout_seconds)),
             )
             candidate_cache = SemanticCache(cache_client, settings.cache_options())
             await candidate_cache.initialize()

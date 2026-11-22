@@ -9,8 +9,10 @@ import logging
 import math
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from qdrant_client import QdrantClient, models
@@ -77,7 +79,7 @@ def ensure_cache_collection(client: QdrantClient, name: str) -> bool:
     return created
 
 
-def write_skip_reason(state: dict) -> str | None:
+def write_skip_reason(state: Mapping[str, Any]) -> str | None:
     if not state.get("chunks"):
         return "no_chunks"
     if state.get("rerank_fallback") or state.get("image_fallback"):
