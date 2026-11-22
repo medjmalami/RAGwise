@@ -238,6 +238,12 @@ async def _stream_graph(
                         emit("sources", [_public_source(c) for c in chunks])
                     elif node == "generate":
                         answer = update.get("answer")
+                        for chunk in chunks:
+                            chunk["images"] = [
+                                {"path": image["path"], "n": image["n"]}
+                                for image in update.get("images_used", [])
+                                if image.get("chunk_id") == chunk.get("chunk_id")
+                            ]
 
     if answer is None:
         raise GenerationError("The graph finished without producing an answer")
@@ -354,6 +360,7 @@ async def _produce(
                 "conversation_id": ctx.conversation_id,
                 "title": title,
                 "answer": answer,
+                "sources": [{**_public_source(c), "images": c.get("images", [])} for c in chunks],
             },
         )
 
