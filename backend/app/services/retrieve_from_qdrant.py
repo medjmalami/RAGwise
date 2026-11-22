@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 from qdrant_client import QdrantClient, models
 
@@ -172,6 +172,7 @@ def retrieve_top_k(
     query_filter: Optional[models.Filter] = None,
     score_threshold: Optional[float] = None,
     prefetch_limit: int = DEFAULT_PREFETCH_LIMIT,
+    embedded: Optional[dict] = None,
 ) -> list[dict]:
     """Hybrid retrieval of the top-k chunks for `query`.
 
@@ -201,6 +202,7 @@ def retrieve_top_k(
                                  match=models.MatchValue(value=True),
                              )])
         score_threshold: Drop results whose fused score is below this.
+        embedded:        Optional precomputed dense/sparse embedding of this query.
         prefetch_limit:  Candidates each prefetch pulls before fusion.
                          Bump to 50–100 if you filter heavily — the filter
                          applies inside the prefetch, so a tight filter on a
@@ -219,7 +221,11 @@ def retrieve_top_k(
     if not query or not query.strip():
         raise ValueError("query must be a non-empty string")
 
-    embedded = embed_query(query, embedder, return_sparse=use_sparse)
+    embedded = (
+        embedded
+        if embedded is not None
+        else embed_query(query, embedder, return_sparse=use_sparse)
+    )
     dense_vec = embedded["dense"]
 
     prefetch: list[models.Prefetch] = [

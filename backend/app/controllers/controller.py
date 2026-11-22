@@ -236,7 +236,13 @@ async def _stream_graph(
                     if node == "retrieve":
                         chunks = update.get("chunks") or []
                         emit("sources", [_public_source(c) for c in chunks])
-                    elif node == "generate":
+                    elif node == "generate" or (
+                        node == "read_cache" and update.get("cache_status") == "hit"
+                    ):
+                        if node == "read_cache":
+                            chunks = update["chunks"]
+                            emit("sources", [_public_source(c) for c in chunks])
+                            emit("token", {"text": update["answer"]})
                         answer = update.get("answer")
                         for chunk in chunks:
                             chunk["images"] = [

@@ -270,6 +270,8 @@ def main(args: argparse.Namespace) -> None:
         reranker=reranker,
         use_images=args.images,
         rewrite_llm=llms.rewrite,
+        use_cache=args.use_cache,
+        cache_options=settings.cache_options(),
     )
 
     metrics = build_metrics(judge)
@@ -298,6 +300,7 @@ def main(args: argparse.Namespace) -> None:
                 "generator_base_url": settings.llm_base_url,
                 "embed_model": EMBED_MODEL,
                 "use_images": str(args.images),
+                "use_cache": str(args.use_cache),
             },
         )
 
@@ -338,6 +341,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Dataset run name (default: auto with timestamp)",
     )
+    p.add_argument("--use-cache", action="store_true", help="Opt into semantic caching; disabled for baseline evaluations")
     p.add_argument("--top-k", type=int, default=5)
     p.add_argument(
         "--limit", type=int, default=None, help="Only evaluate the first N items"
