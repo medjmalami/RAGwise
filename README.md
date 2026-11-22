@@ -265,3 +265,16 @@ These results come from a single run on a 100-question synthetic testset, so dif
 - Langfuse configuration is required: the backend settings require its keys and base URL at import, and startup initializes the Langfuse client and trace exporter. The application does not provide a no-Langfuse mode.
 - Database migrations are managed by Alembic. Apply them with `uv run alembic upgrade head` from `backend/`.
 - The chat frontend is configured for the local backend at port 8000 and local CORS origin at port 3001. If you change either port, update the frontend URL or backend CORS settings accordingly.
+## Cited images
+
+Assistant answers display thumbnails for images supplied to the model from cited
+sources. Comma-separated citations such as `[1, 2]` link to each source separately.
+Thumbnails also appear in the Sources panel and open a full-size viewer.
+
+Image references are saved in message source metadata; no migration or new
+environment variable is required. Older messages without recorded image usage
+do not display thumbnails. Text-only fallback responses do not claim image usage.
+The `done` SSE event includes finalized `sources` with `images: [{path, n}]`.
+The authenticated `GET /conversations/{id}/image?path=...` endpoint serves only
+images referenced by saved messages in the caller's conversation, beneath the
+model's configured image root. Keep the indexed image files available after reload.

@@ -40,6 +40,7 @@ def slim_sources(chunks: list[dict]) -> list[dict]:
             "score": c.get("score"),
             "retrieval_score": c.get("retrieval_score"),
             "hybrid_rank": c.get("hybrid_rank"),
+            "images": c.get("images", []),
         }
         for c in chunks
     ]
