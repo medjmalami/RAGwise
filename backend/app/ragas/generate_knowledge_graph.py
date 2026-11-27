@@ -1,4 +1,3 @@
-import os
 import random
 
 from langchain_core.documents import Document
@@ -12,11 +11,7 @@ from ragas.testset import Testset, TestsetGenerator
 from ragas.testset.graph import KnowledgeGraph, Node, NodeType
 from ragas.testset.transforms import apply_transforms, default_transforms
 
-from app.config.config import settings
-
 # --- CONFIGURATION ---
-os.environ.setdefault("GOOGLE_API_KEY", settings.gemini_api_key)
-
 QDRANT_URL = "http://localhost:6333"
 QDRANT_API_KEY = None
 COLLECTION_NAME = "ragwise_arxiv"
@@ -95,7 +90,7 @@ for doc in docs:
     )
 
 # --- 4. APPLY TRANSFORMS ---
-print("Initializing Google LLM and BGE-M3 embedder...")
+print("Initializing Ollama LLM and BGE-M3 embedder...")
 generator_llm = LangchainLLMWrapper(ChatOllama(model="gemma4:31b-cloud"))
 generator_embeddings = LangchainEmbeddingsWrapper(
     HuggingFaceEmbeddings(

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     semantic_cache_timeout_seconds: float = Field(default=2.0, gt=0)
     semantic_cache_corpus_version: str = "1"
     database_url: str
-    gemini_api_key: str
+    gemini_api_key: Optional[str] = None
     langfuse_public_key: str
     langfuse_secret_key: str
     langfuse_base_url: str
@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    llm_token_limit_field: Literal["max_tokens", "max_completion_tokens"] = (
+        "max_completion_tokens"
+    )
     llm_thinking_control: Literal[
         "unsupported",
         "reasoning_effort",

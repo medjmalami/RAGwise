@@ -19,13 +19,6 @@ _NO_THINK: dict[str, dict] = {
 }
 
 
-def _extra_body(thinking: bool) -> Optional[dict]:
-    body = dict(settings.llm_extra_body)
-    if not thinking:
-        body.update(_NO_THINK[settings.llm_thinking_control])
-    return body or None
-
-
 def _make(
     cls: type[T],
     *,
@@ -34,6 +27,13 @@ def _make(
     max_tokens: Optional[int] = None,
     thinking: bool = True,
 ) -> T:
+    body = dict(settings.llm_extra_body)
+    if not thinking:
+        body.update(_NO_THINK[settings.llm_thinking_control])
+    if max_tokens is not None and settings.llm_token_limit_field == "max_tokens":
+        # ChatOpenAI rewrites its token limit to max_completion_tokens.
+        body["max_tokens"] = max_tokens
+        max_tokens = None
     return cls(
         model=model or settings.llm_model,
         base_url=settings.llm_base_url,
@@ -43,7 +43,7 @@ def _make(
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
         stream_usage=settings.llm_stream_usage,
-        extra_body=_extra_body(thinking),
+        extra_body=body or None,
     )
 
 
