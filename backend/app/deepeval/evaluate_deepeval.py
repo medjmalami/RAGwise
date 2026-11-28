@@ -34,7 +34,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, cast
 
-
 # Keep ``--help`` usable without importing the application and its service
 # clients.  These paths also support invoking this file directly from either
 # ``backend/`` or ``backend/app/deepeval/``.
@@ -285,7 +284,9 @@ def _serialize_test_case(
         if turn.role == "assistant":
             turn_metadata = turn.metadata or {}
             thread_id = turn_metadata.get("thread_id")
-            thread_details = details.get(thread_id, []) if isinstance(thread_id, str) else []
+            thread_details = (
+                details.get(thread_id, []) if isinstance(thread_id, str) else []
+            )
             detail = (
                 thread_details[assistant_index]
                 if assistant_index < len(thread_details)
@@ -298,7 +299,6 @@ def _serialize_test_case(
                     "retrieval_context": list(detail.get("contexts", [])),
                     "chunk_ids": list(detail.get("chunk_ids", [])),
                     "paper_ids": list(detail.get("paper_ids", [])),
-                    "latency_s": detail.get("latency_s"),
                     "rewritten_query": detail.get("rewritten_query"),
                     "rerank_fallback": bool(detail.get("rerank_fallback", False)),
                     "images_used": list(detail.get("images_used", [])),
@@ -320,11 +320,11 @@ def make_task(
     from deepeval.simulator import ConversationSimulator
     from deepeval.test_case import Turn
 
-    from app.graph.rag_graph import GenerationError, RetrievalError
-
     # Imported here so app imports remain deferred for --help.
     from langfuse import propagate_attributes
     from langfuse.langchain import CallbackHandler
+
+    from app.graph.rag_graph import GenerationError, RetrievalError
 
     rerank_limiter = _RerankRateLimiter(DEFAULT_RERANK_INTERVAL_S)
 
@@ -336,11 +336,11 @@ def make_task(
         failures: list[str] = []
         golden: Any = None
 
-        async def model_callback(user_input: str, thread_id: str) -> Turn:
+        async def model_callback(*, input: str, thread_id: str) -> Turn:
+            user_input = input
             await rerank_limiter.wait()
             history = histories[thread_id]
             history_len = len(history)
-            started = time.perf_counter()
             state: dict[str, Any] | None = None
             last_error: Optional[Exception] = None
 
@@ -417,7 +417,6 @@ def make_task(
                     "chunk_ids": [chunk.get("chunk_id") for chunk in chunks],
                     "paper_ids": [chunk.get("paper_id") for chunk in chunks],
                     "contexts": [chunk.get("text", "") for chunk in chunks],
-                    "latency_s": round(time.perf_counter() - started, 2),
                     "rewritten_query": state.get("rewritten_query"),
                     "rerank_fallback": bool(state.get("rerank_fallback", False)),
                     "images_used": [
@@ -457,6 +456,8 @@ def make_task(
                 raise RuntimeError(
                     "Installed DeepEval does not expose its async conversation simulator"
                 )
+            # DeepEval's run wrapper initializes this before the first model call.
+            simulator.simulation_cost = 0 if simulator.using_native_model else None
             test_case = await simulate_one(
                 golden=golden,
                 max_user_simulations=args.max_user_turns,
@@ -491,7 +492,9 @@ def make_task(
                 "scenario": str(_field(item, "input", "")),
                 "turns": turns,
             }
-        except Exception as exc:  # task errors are represented and evaluated as failures
+        except (
+            Exception
+        ) as exc:  # task errors are represented and evaluated as failures
             error_text = f"{type(exc).__name__}: {exc}"
             log.exception("Conversation simulation failed for %s", gid)
             return {
@@ -541,8 +544,8 @@ def make_evaluator(args: argparse.Namespace, judge: Any) -> Any:
         expected_output: Any = None,
         **kwargs: Any,
     ) -> Any:
-        from langfuse import Evaluation
         from deepeval.metrics import TurnContextualRelevancyMetric
+        from langfuse import Evaluation
 
         if not isinstance(output, dict):
             return Evaluation(
@@ -618,10 +621,10 @@ def _average_scores(result: Any) -> tuple[float, int, int]:
 
 
 def run(args: argparse.Namespace) -> Any:
+    from gen_conversational_goldens import build_llm
     from langfuse import Langfuse
 
     from app.config.config import settings
-    from gen_conversational_goldens import build_llm
 
     logging.basicConfig(
         level=logging.INFO,
@@ -629,8 +632,7 @@ def run(args: argparse.Namespace) -> Any:
     )
 
     run_name = args.run_name or (
-        f"{EXPERIMENT_NAME}-"
-        f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        f"{EXPERIMENT_NAME}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
     )
     langfuse = Langfuse(
         public_key=settings.langfuse_public_key,
@@ -677,10 +679,7 @@ def run(args: argparse.Namespace) -> Any:
         )
         average, scored, total = _average_scores(result)
         print(f"\n=== DeepEval summary (run: {result.run_name}) ===")
-        print(
-            f"{CONTEXTUAL_RELEVANCY_NAME:24s} {average:.3f} "
-            f"(n={scored}/{total})"
-        )
+        print(f"{CONTEXTUAL_RELEVANCY_NAME:24s} {average:.3f} (n={scored}/{total})")
         if result.dataset_run_url:
             print(f"\nDataset run: {result.dataset_run_url}")
         return result
@@ -717,7 +716,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
 
     simulation = parser.add_argument_group("Simulation")
-    simulation.add_argument("--max-user-turns", type=int, default=DEFAULT_MAX_USER_TURNS)
+    simulation.add_argument(
+        "--max-user-turns", type=int, default=DEFAULT_MAX_USER_TURNS
+    )
     simulation.add_argument(
         "--retries",
         type=int,
@@ -737,7 +738,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     simulation.add_argument("--temperature", type=float, default=0.7)
 
     graph = parser.add_argument_group("RAG graph")
-    graph.add_argument("--use-cache", action="store_true", help="Opt into semantic caching; disabled for baseline evaluations")
+    graph.add_argument(
+        "--use-cache",
+        action="store_true",
+        help="Opt into semantic caching; disabled for baseline evaluations",
+    )
     graph.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     graph.add_argument(
         "--no-images",
