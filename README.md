@@ -40,8 +40,8 @@ The HTML, assets, parsed files, chunk files, embedding markers, Qdrant data, and
 - Python 3.11 or newer and [uv](https://docs.astral.sh/uv/)
 - Node.js 20 or newer and Bun (or npm)
 - Docker with Compose
-- An Ollama server accessible at `http://localhost:11434`, with `gemma4:31b-cloud` available to it
-- API credentials for Langfuse and Cohere. `GEMINI_API_KEY` is also a required backend setting and is used for picture descriptions when indexing enables them.
+- An Ollama server accessible at `http://localhost:11434`, with `gemma4:31b-cloud` available to it and an active Ollama sign-in for cloud inference
+- API credentials for Langfuse and Cohere. Figure descriptions during indexing use `GEMINI_API_KEY` when enabled.
 
 The backend loads BGE-M3 at startup. The initial run downloads model files and can take time; GPU use is automatic when CUDA is available, otherwise the embedder uses CPU.
 
@@ -66,7 +66,11 @@ Create `backend/.env` from `backend/.env.example` and provide the backend settin
 | `COHERE_API_KEY` | Cohere reranking |
 | `OTEL_SERVICE_NAME` | OpenTelemetry service name |
 | `JWT_SECRET` | Secret used to sign access tokens |
-| `GEMINI_API_KEY` | Required by the backend configuration and for picture descriptions during parsing |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Set to `http://localhost:11434/v1`, `ollama`, and `gemma4:31b-cloud` for the Ollama daemon |
+| `LLM_SUMMARY_MODEL`, `LLM_TITLE_MODEL`, `LLM_REWRITE_MODEL` | Optional overrides. Leave unset to use `LLM_MODEL` for all three roles. |
+| `LLM_THINKING_CONTROL`, `LLM_MAIN_THINKING` | Set to `reasoning_effort` and `false` to disable thinking for Ollama Gemma 4 |
+| `LLM_TOKEN_LIMIT_FIELD` | Set to `max_tokens` to apply output limits on Ollama's chat-completions endpoint |
+| `GEMINI_API_KEY` | Used for figure descriptions during indexing |
 | `COHERE_RERANK_MODEL` | Optional; defaults to `rerank-v3.5` |
 | `COOKIE_SECURE` | Optional; defaults to `true`. Set to `false` for local HTTP sign-in cookies. |
 
@@ -233,7 +237,7 @@ Create and upload a testset in this order. Run the commands from `backend/` with
      --testset-size 100
    ```
 
-   The script's options and defaults are `--kg-path` (`knowledge_graph.json`), `--output-csv` (`testset.csv`), `--testset-size` (`10`), `--model` (`gemma4:31b-cloud`), `--ollama-base-url` (`http://localhost:11434`), `--embedding-model` (`BAAI/bge-m3`), `--max-workers` (`3`), `--max-wait` (`90` seconds), and `--max-retries` (`8`). The graph-building stage uses the local Qdrant collection, BGE-M3 embeddings, and an Ollama `gemma4:31b-cloud` model; it also sets the configured `GEMINI_API_KEY` as `GOOGLE_API_KEY`. The generation stage uses Ollama and BGE-M3. Both scripts import the backend settings, so all required backend environment settings must be present.
+   The script's options and defaults are `--kg-path` (`knowledge_graph.json`), `--output-csv` (`testset.csv`), `--testset-size` (`10`), `--model` (`gemma4:31b-cloud`), `--ollama-base-url` (`http://localhost:11434`), `--embedding-model` (`BAAI/bge-m3`), `--max-workers` (`3`), `--max-wait` (`90` seconds), and `--max-retries` (`8`). The graph-building stage uses the local Qdrant collection, BGE-M3 embeddings, and Ollama `gemma4:31b-cloud`. The generation stage uses Ollama and BGE-M3.
 
    The CSV contains generated questions (`user_input`), expected answers (`reference`), and source contexts (`reference_contexts`). The graph builder selects at most 200 chunks; missing or textless payloads can reduce the node count, and relation counts depend on the transforms. The checked-in code does not fix either graph count.
 
