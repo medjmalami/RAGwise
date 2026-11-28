@@ -375,6 +375,7 @@ def build_rag_graph(
     use_cache: bool = False,
     cache: Optional[SemanticCache] = None,
     cache_options: Optional[CacheOptions] = None,
+    cache_write_enabled: bool = True,
 ) -> CompiledStateGraph:
     if use_images and not isinstance(llm, PathImageChatOpenAI):
         raise TypeError(
@@ -499,6 +500,13 @@ def build_rag_graph(
         return trace_cache(update)
 
     async def write_cache(state: RAGState) -> dict:
+        if not cache_write_enabled:
+            return trace_cache(
+                {
+                    "cache_write_status": "skipped",
+                    "cache_skip_reason": "writes_disabled",
+                }
+            )
         reason = write_skip_reason(state)
         embedded = state.get("cache_embedding")
         if reason or not embedded:
