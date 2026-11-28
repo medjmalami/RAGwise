@@ -11,11 +11,13 @@ from pathlib import Path
 from contextlib import nullcontext
 from types import SimpleNamespace
 from uuid import uuid4
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, create_autospec, patch
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from qdrant_client import QdrantClient
+from qdrant_client.http.models import QueryResponse
 from app.graph.rag_graph import build_rag_graph
+from app.services.rerank import CohereReranker
 from app.services.retrieve_from_qdrant import QueryEmbedder, retrieve_top_k
 from app.services.semantic_cache import (
     CacheOptions,
@@ -65,9 +67,11 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
             self.client, CacheOptions(collection="ragwise_cache_test_" + uuid4().hex)
         )
         await self.cache.initialize()
-        self.reranker = SimpleNamespace(
-            model="test", rerank=AsyncMock(side_effect=lambda **kw: kw["chunks"])
-        )
+        reranker = create_autospec(CohereReranker, instance=True)
+        reranker.model = "test"
+        self.rerank_mock: AsyncMock = reranker.rerank
+        self.rerank_mock.side_effect = lambda **kwargs: kwargs["chunks"]
+        self.reranker: CohereReranker = reranker
         self.llm = FakeListChatModel(responses=["Supported answer [1]."])
 
     async def asyncTearDown(self):
@@ -107,7 +111,7 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(second["answer"], first["answer"])
             self.assertEqual(second["chunks"], first["chunks"])
             self.assertEqual(retrieve.call_count, 1)
-            self.assertEqual(self.reranker.rerank.await_count, 1)
+            self.rerank_mock.assert_awaited_once()
             for history, summary in [
                 ([{"role": "user", "content": "Earlier"}], None),
                 ([], "Earlier conversation"),
@@ -275,17 +279,20 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-        graph = SimpleNamespace(astream=stream)
-        ctx = SimpleNamespace(
+        graph = self.graph(use_cache=True)
+        ctx = controller.TurnContext(
             query=INPUT["query"],
             is_new=True,
             history=[],
+            existing_title=None,
             summary=None,
+            summary_upto_id=None,
             user_id=1,
             conversation_id=uuid4(),
         )
         queue = asyncio.Queue()
         with (
+            patch.object(graph, "astream", new=stream),
             patch.object(
                 controller, "_make_title", new_callable=AsyncMock, return_value="Title"
             ),
@@ -321,11 +328,13 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_retrieval_embedding_reuse(self):
-        client = SimpleNamespace(
-            query_points=lambda **kwargs: SimpleNamespace(points=[])
-        )
-        with patch("app.services.retrieve_from_qdrant.embed_query") as embed:
-            retrieve_top_k("query", client, QueryEmbedder(), embedded=EMBEDDED)
+        with (
+            patch.object(
+                self.client, "query_points", return_value=QueryResponse(points=[])
+            ),
+            patch("app.services.retrieve_from_qdrant.embed_query") as embed,
+        ):
+            retrieve_top_k("query", self.client, QueryEmbedder(), embedded=EMBEDDED)
             embed.assert_not_called()
 
 
